@@ -1,0 +1,102 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  api:
+    build: .
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./outputs/jobs.db
+    env_file: .env
+    volumes:
+      - ./outputs:/app/outputs
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker_gpu:
+    build: .
+    runtime: nvidia
+    command: >
+      celery -A server.tasks.celery_app worker
+      --loglevel=info
+      --concurrency=1
+      --queues=gpu
+      --hostname=gpu_worker@%h
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./outputs/jobs.db
+    env_file: .env
+    volumes:
+      - ./outputs:/app/outputs
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker_cpu:
+    build: .
+    command: >
+      celery -A server.tasks.celery_app worker
+      --loglevel=info
+      --concurrency=8
+      --queues=cpu
+      --hostname=cpu_worker@%h
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./outputs/jobs.db
+    env_file: .env
+    volumes:
+      - ./outputs:/app/outputs
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  flower:
+    build: .
+    command: celery -A server.tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

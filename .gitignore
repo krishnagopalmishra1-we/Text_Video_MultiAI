@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# Environment & secrets
+.env
+config/api_keys.local.yaml
+
+# Outputs & data
+outputs/
+*.mp4
+*.wav
+*.aac
+*.mp3
+
+# HF cache
+hf_cache/
+
+# DB
+*.db
+*.db-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker-compose.override.yml
+
+# Logs
+*.log

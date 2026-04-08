@@ -1,0 +1,78 @@
+styles:
+  cinematic:
+    prefix: "cinematic film shot, 35mm, anamorphic lens, shallow depth of field, golden hour lighting,"
+    suffix: ", film grain, color graded, ultra realistic"
+    negative: "cartoon, animation, blurry, low quality, watermark, text"
+
+  documentary:
+    prefix: "documentary style, natural lighting, handheld camera, realistic,"
+    suffix: ", authentic, raw, photojournalistic"
+    negative: "staged, artificial, CGI, cartoon"
+
+  commercial:
+    prefix: "commercial advertisement style, professional lighting, 4K, clean, polished,"
+    suffix: ", product quality, vibrant colors"
+    negative: "amateur, dark, grainy, low budget"
+
+  sci_fi:
+    prefix: "sci-fi futuristic, neon lights, advanced technology, cinematic, atmospheric,"
+    suffix: ", cyberpunk aesthetic, volumetric lighting"
+    negative: "medieval, historical, cartoonish"
+
+  nature:
+    prefix: "nature documentary, BBC style, golden hour, macro or wide angle, photorealistic,"
+    suffix: ", David Attenborough style, stunning visuals"
+    negative: "urban, indoor, artificial"
+
+  dramatic:
+    prefix: "dramatic cinematic, high contrast, moody lighting, powerful composition,"
+    suffix: ", epic scale, emotional impact"
+    negative: "flat, boring, low contrast"
+
+camera_motions:
+  static: "static camera, locked shot,"
+  pan_left: "slow pan left,"
+  pan_right: "slow pan right,"
+  tilt_up: "slow tilt up,"
+  tilt_down: "slow tilt down,"
+  zoom_in: "slow zoom in, push in,"
+  zoom_out: "slow zoom out, pull back,"
+  dolly_forward: "dolly forward, tracking shot,"
+  dolly_backward: "dolly backward,"
+  orbit: "orbital camera move, 360 rotation,"
+  handheld: "handheld camera, slight shake, authentic movement,"
+  crane_up: "crane shot moving up, aerial rise,"
+  crane_down: "crane shot moving down,"
+  aerial: "aerial drone shot, birds eye view,"
+
+pacing:
+  slow: { words_per_second: 2.0, scene_buffer_seconds: 2.0 }
+  normal: { words_per_second: 2.5, scene_buffer_seconds: 1.5 }
+  fast: { words_per_second: 3.0, scene_buffer_seconds: 1.0 }
+
+transitions:
+  fade_black: { duration: 0.5, type: fade }
+  fade_white: { duration: 0.5, type: fade, color: white }
+  crossfade: { duration: 0.8, type: crossfade }
+  cut: { duration: 0.0, type: cut }
+  wipe_left: { duration: 0.4, type: wipe, direction: left }
+  dissolve: { duration: 1.0, type: dissolve }
+
+audio:
+  tts:
+    backend: kokoro        # kokoro (local) | elevenlabs (api)
+    voice: "af_heart"      # kokoro voice ID
+    speed: 1.0
+    sample_rate: 24000
+
+  music:
+    backend: musicgen      # musicgen (local)
+    model: "facebook/musicgen-large"
+    duration_mode: full    # full | per_scene
+    volume_db: -18         # background level
+    narration_volume_db: -3
+
+  mix:
+    narration_lead_in: 0.3   # seconds before scene starts
+    fade_in: 1.0
+    fade_out: 1.5

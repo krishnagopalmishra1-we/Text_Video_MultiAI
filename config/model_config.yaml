@@ -1,0 +1,88 @@
+# A100 80GB — model priority stack
+# VRAM budget: 80GB total
+# Precision: bfloat16 (native A100 support)
+
+models:
+  local:
+    wan2:
+      enabled: true
+      priority: 1
+      hf_id: "Wan-AI/Wan2.1-T2V-14B"
+      vram_gb: 40
+      dtype: bfloat16
+      max_frames: 81        # ~5s @ 16fps or ~10s @ 8fps
+      fps: 16
+      resolution: [1280, 720]
+      compile: false        # torch.compile needs python3-dev headers; disabled
+      flash_attention: true
+      offload: false
+      notes: "Best quality. Primary model."
+
+    hunyuan:
+      enabled: true
+      priority: 2
+      hf_id: "tencent/HunyuanVideo"
+      vram_gb: 60
+      dtype: bfloat16
+      max_frames: 129       # ~5s @ 24fps
+      fps: 24
+      resolution: [1280, 720]
+      compile: false        # HunyuanVideo has own compile path
+      flash_attention: true
+      offload: cpu          # offload text encoder to CPU
+      notes: "Cinema quality. Use for hero scenes."
+
+    cogvideox:
+      enabled: true
+      priority: 3
+      hf_id: "THUDM/CogVideoX-5b"
+      vram_gb: 24
+      dtype: bfloat16
+      max_frames: 49        # ~6s @ 8fps
+      fps: 8
+      resolution: [720, 480]
+      compile: false        # torch.compile needs python3-dev headers; disabled
+      flash_attention: true
+      offload: false
+      notes: "Fast. Use for bulk scenes."
+
+    ltx:
+      enabled: true
+      priority: 4
+      hf_id: "Lightricks/LTX-Video"
+      vram_gb: 10
+      dtype: bfloat16
+      max_frames: 121       # ~5s @ 24fps
+      fps: 24
+      resolution: [768, 512]
+      compile: false        # torch.compile needs python3-dev headers; skip for inference
+      flash_attention: false
+      offload: false
+      notes: "Fastest. Preview and fallback."
+
+  api:
+    runway:
+      enabled: true
+      version: "gen4.5"
+      max_duration: 10
+      resolution: [1280, 720]
+      use_for: "fallback + hero scenes"
+
+upscaler:
+  enabled: true
+  model: "RealESRGAN_x4plus"
+  target_resolution: [3840, 2160]   # 4K
+  tile_size: 512
+  device: cuda
+
+generation:
+  default_clip_duration: 10         # seconds
+  max_clip_duration: 20
+  min_clip_duration: 5
+  target_fps: 24
+  output_resolution: [1920, 1080]   # 1080p; upscale to 4K post
+  intermediate_format: mp4
+  codec: libx264
+  crf: 18
+  preset: slow
+  cpu_threads: 48

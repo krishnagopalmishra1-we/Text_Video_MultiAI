@@ -1,0 +1,8 @@
+# Only two keys needed for the full system
+# Set as environment variables — never commit real values
+
+anthropic:
+  api_key: "${ANTHROPIC_API_KEY}"   # prompt generation (Claude Haiku)
+
+runway:
+  api_key: "${RUNWAY_API_KEY}"      # hero scenes + local fallback
