@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>Video Generator Control Panel</h1>
+      <div class="subtitle">No node canvas. Just submit prompt/script and track progress.</div>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <form id="job-form">
+          <label for="script">Script / Prompt</label>
+          <textarea id="script" placeholder="Write your scene script here. One paragraph per scene works best." required></textarea>
+
+          <div class="row-3">
+            <div>
+              <label for="quality">Quality</label>
+              <select id="quality">
+                <option value="high">high</option>
+                <option value="fast">fast</option>
+                <option value="preview">preview</option>
+              </select>
+            </div>
+            <div>
+              <label for="style">Style</label>
+              <input id="style" type="text" value="cinematic" />
+            </div>
+            <div>
+              <label for="pacing">Pacing</label>
+              <select id="pacing">
+                <option value="slow">slow</option>
+                <option value="normal" selected>normal</option>
+                <option value="fast">fast</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="min_clip">Min Clip (sec)</label>
+              <input id="min_clip" type="text" value="5" />
+            </div>
+            <div>
+              <label for="max_clip">Max Clip (sec)</label>
+              <input id="max_clip" type="text" value="20" />
+            </div>
+          </div>
+
+          <div class="row-3">
+            <div>
+              <label for="preferred_model">Preferred Model</label>
+              <select id="preferred_model">
+                <option value="wan2" selected>wan2</option>
+                <option value="hunyuan">hunyuan</option>
+                <option value="cogvideox">cogvideox</option>
+                <option value="ltx">ltx</option>
+              </select>
+            </div>
+            <div>
+              <label for="transition">Transition</label>
+              <input id="transition" type="text" value="crossfade" />
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <div>
+                <label><input id="api_fallback" type="checkbox" checked /> Runway fallback if local fails</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>&nbsp;</label>
+              <div>
+                <label><input id="upscale_4k" type="checkbox" /> Upscale 4K</label>
+                <label><input id="resume" type="checkbox" checked /> Resume</label>
+              </div>
+            </div>
+            <div></div>
+          </div>
+
+          <div class="actions">
+            <button class="primary" id="submit-btn" type="submit">Generate Video</button>
+            <button class="secondary" id="refresh-btn" type="button">Check Status</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div>
+          <span class="status-pill" id="status-pill">idle</span>
+        </div>
+
+        <div class="kv">
+          <div class="k">Job ID</div>
+          <div class="mono" id="job-id">-</div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div>
+            <label for="job_id_input">Existing Job ID</label>
+            <input id="job_id_input" type="text" placeholder="paste job id to resume tracking" />
+          </div>
+          <div>
+            <label>Scenes</label>
+            <div id="scenes">0 / 0</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <label>Progress <span id="progress-text">0.0%</span></label>
+          <div class="progress"><div id="progress-inner"></div></div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Output</div>
+          <div class="mono" id="output-path">-</div>
+        </div>
+        <div class="kv">
+          <div class="k">Error</div>
+          <div class="mono" id="error">-</div>
+        </div>
+
+        <div id="download-wrap" style="display: none;">
+          <a class="download-link" id="download-link" href="#">Download MP4</a>
+        </div>
+
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/app/app.js"></script>
+</body>
+</html>

@@ -41,6 +41,15 @@ TRANSITION_MAP = {
 }
 
 
+_XFADE_NAME_MAP = {
+    "crossfade": "fade",
+    "fade_black": "fadeblack",
+    "fade_white": "fadewhite",
+    "wipe_left": "wipeleft",
+    "dissolve": "dissolve",
+}
+
+
 def build_xfade_chain(
     clip_durations: list[float],
     transition_type: str = "crossfade",
@@ -57,6 +66,8 @@ def build_xfade_chain(
         inputs = "".join(f"[{i}:v]" for i in range(n))
         return f"{inputs}concat=n={n}:v=1:a=0[outv]"
 
+    # Map user-facing names to valid FFmpeg xfade transition identifiers
+    xfade_name = _XFADE_NAME_MAP.get(transition_type, transition_type)
     td = transition_duration
     lines: list[str] = []
     cumulative = 0.0
@@ -67,7 +78,7 @@ def build_xfade_chain(
         in_b = f"[{i + 1}:v]"
         out = f"[v{i + 1}]" if i < n - 2 else "[outv]"
         lines.append(
-            f"{in_a}{in_b}xfade=transition={transition_type}:"
+            f"{in_a}{in_b}xfade=transition={xfade_name}:"
             f"duration={td}:offset={cumulative:.3f}{out}"
         )
 

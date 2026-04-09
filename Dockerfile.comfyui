@@ -1,0 +1,45 @@
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    CUDA_HOME=/usr/local/cuda \
+    PATH="/usr/local/cuda/bin:$PATH" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip \
+    git wget curl \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python  python  /usr/bin/python3.11 1 \
+ && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# PyTorch stack pinned to CUDA 12.4 to keep torch/torchaudio ABI-compatible.
+RUN pip install --no-cache-dir \
+    torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+RUN pip install --no-cache-dir huggingface_hub
+
+# ── ComfyUI ──────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /opt/comfyui
+WORKDIR /opt/comfyui
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ── WanVideoWrapper custom node (TeaCache built-in) ──────────────────────────
+RUN git clone --depth 1 https://github.com/kijai/ComfyUI-WanVideoWrapper.git \
+    /opt/comfyui/custom_nodes/ComfyUI-WanVideoWrapper
+RUN pip install --no-cache-dir \
+    -r /opt/comfyui/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt \
+    2>/dev/null || true
+
+# Model directory stubs (overridden by comfyui_models volume on first run)
+RUN mkdir -p /opt/comfyui/models/{diffusion_models,text_encoders,vae,unet,loras,checkpoints}
+
+COPY scripts/comfyui_start.sh /opt/comfyui_start.sh
+RUN chmod +x /opt/comfyui_start.sh
+
+EXPOSE 8188
+CMD ["/opt/comfyui_start.sh"]

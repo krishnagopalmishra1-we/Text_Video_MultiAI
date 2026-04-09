@@ -29,10 +29,12 @@ class VideoRouter:
         output_dir: str | Path = "outputs/scenes",
         quality: QualityMode = "high",
         local_retries: int = 2,
+        api_fallback: bool = True,
     ):
         self.output_dir = Path(output_dir)
         self.quality = quality
         self.local_retries = local_retries
+        self.api_fallback = api_fallback
         self.local = LocalRunner(config_path)
         self.api = APIRunner()
 
@@ -67,8 +69,13 @@ class VideoRouter:
                     seed=seed,
                 )
             except Exception as e:
-                logger.warning(f"Local attempt {attempt}/{self.local_retries} failed: {e}")
+                logger.exception(f"Local attempt {attempt}/{self.local_retries} failed")
                 local_errors.append(str(e))
+
+        if not self.api_fallback:
+            raise RuntimeError(
+                f"Local generation failed and API fallback is disabled. Errors: {' | '.join(local_errors)}"
+            )
 
         logger.info(f"Scene {scene.scene_id}: local failed → Runway fallback")
         try:
@@ -102,8 +109,13 @@ class VideoRouter:
                     ),
                 )
             except Exception as e:
-                logger.warning(f"Local async attempt {attempt} failed: {e}")
+                logger.exception(f"Local async attempt {attempt} failed")
                 local_errors.append(str(e))
+
+        if not self.api_fallback:
+            raise RuntimeError(
+                f"Local generation failed and API fallback is disabled. Errors: {' | '.join(local_errors)}"
+            )
 
         try:
             return await self.api.generate(scene, self.output_dir)
@@ -114,6 +126,7 @@ class VideoRouter:
         self,
         scenes: list[SceneData],
         hero_scene_ids: list[int] | None = None,
+        preferred_model: str | None = None,
         resume: bool = True,
     ) -> list[Path]:
         """
@@ -132,6 +145,7 @@ class VideoRouter:
                 continue
             path = self.generate_scene(
                 scene,
+                preferred_model=preferred_model,
                 seed=scene.scene_id,
                 hero=scene.scene_id in hero_ids,
             )

@@ -9,7 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3.10-dev \
     python3.11 python3.11-dev python3-pip \
+    build-essential \
     ffmpeg \
     git wget curl \
     libsndfile1 libsndfile1-dev \
@@ -39,7 +41,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Patch diffusers attention_dispatch.py: wrap flash_attn_3 custom_op registration in
 # try/except to avoid infer_schema failure with flash-attn>=2.8 string annotations.
 COPY scripts/patch_diffusers.py /tmp/patch_diffusers.py
-RUN python /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
+# Use python3.10 — pip installs packages into python3.10 even though python3.11 is default
+RUN python3.10 /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
 
 # App code
 COPY . .

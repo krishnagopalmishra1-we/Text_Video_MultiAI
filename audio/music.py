@@ -64,41 +64,51 @@ class MusicEngine:
         """
         Generate music matching prompt and duration.
         Returns WAV file path.
+        Falls back to silence if MusicGen cannot load on current runtime.
         """
-        self.load()
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        # MusicGen generates in 30s chunks max; tile for longer durations
-        target_tokens = int(duration * 50)  # ~50 tokens/sec at 32kHz
+        try:
+            self.load()
 
-        inputs = self._processor(
-            text=[prompt],
-            padding=True,
-            return_tensors="pt",
-        ).to(self.device)
+            # MusicGen generates in 30s chunks max; tile for longer durations
+            target_tokens = int(duration * 50)  # ~50 tokens/sec at 32kHz
 
-        if seed is not None:
-            torch.manual_seed(seed)
+            inputs = self._processor(
+                text=[prompt],
+                padding=True,
+                return_tensors="pt",
+            ).to(self.device)
 
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
-            audio_values = self._model.generate(
-                **inputs,
-                max_new_tokens=min(target_tokens, 1503),  # model max ~30s
-                do_sample=True,
-                guidance_scale=3.0,
-            )
+            if seed is not None:
+                torch.manual_seed(seed)
 
-        audio = audio_values[0, 0].cpu().float().numpy()
-        sr = self._model.config.audio_encoder.sampling_rate
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+                audio_values = self._model.generate(
+                    **inputs,
+                    max_new_tokens=min(target_tokens, 1503),  # model max ~30s
+                    do_sample=True,
+                    guidance_scale=3.0,
+                )
 
-        # Loop/tile audio if duration > 30s
-        if duration > 30:
-            audio = self._tile_audio(audio, duration, sr)
+            audio = audio_values[0, 0].cpu().float().numpy()
+            sr = self._model.config.audio_encoder.sampling_rate
 
-        sf.write(str(out), audio, sr)
-        logger.info(f"Music: {out} ({len(audio)/sr:.1f}s)")
-        return out
+            # Loop/tile audio if duration > 30s
+            if duration > 30:
+                audio = self._tile_audio(audio, duration, sr)
+
+            sf.write(str(out), audio, sr)
+            logger.info(f"Music: {out} ({len(audio)/sr:.1f}s)")
+            return out
+        except Exception as e:
+            # Keep pipeline alive when model loading is blocked by upstream/runtime constraints.
+            logger.warning(f"Music generation failed, using silence fallback: {e}")
+            sr = _SAMPLE_RATE
+            silence = np.zeros(max(1, int(duration * sr)), dtype=np.float32)
+            sf.write(str(out), silence, sr)
+            return out
 
     def generate_for_video(
         self,

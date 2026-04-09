@@ -27,6 +27,7 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
+# Add HF_TOKEN for faster first-time local model downloads
 ```
 
 ### 3. Run (CLI — simplest)
@@ -65,7 +66,7 @@ Deploy on an Azure GPU VM using the scripts in `deploy/azure`:
 
 1. Provision VM (PowerShell): `./deploy/azure/create_vm.ps1`
 2. SSH to VM and bootstrap: `bash deploy/azure/bootstrap_vm.sh`
-3. Configure env and start: `docker compose up -d --build`
+3. Configure env (`ANTHROPIC_API_KEY`, `RUNWAY_API_KEY`, `HF_TOKEN`) and start: `docker compose up -d --build`
 
 Full guide: `deploy/azure/README.md`
 

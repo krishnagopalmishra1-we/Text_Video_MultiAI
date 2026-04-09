@@ -98,5 +98,38 @@ services:
       - redis
     restart: unless-stopped
 
+  # ── ComfyUI with WanVideoWrapper ─────────────────────────────────────────
+  # NOTE: worker_gpu and comfyui both load Wan2.1-14B (~40 GB VRAM each).
+  # Run only one at a time on the A100 80 GB to avoid OOM.
+  #   Stop worker before ComfyUI: docker compose stop worker_gpu
+  #   Restart after:              docker compose start worker_gpu
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile.comfyui
+    runtime: nvidia
+    ports:
+      - "8188:8188"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/root/.cache/huggingface
+    env_file: .env
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - comfyui_models:/opt/comfyui/models
+      - comfyui_user:/opt/comfyui/user
+      - ./outputs:/opt/comfyui/output
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 volumes:
   hf_cache:
+  comfyui_models:
+  comfyui_user:

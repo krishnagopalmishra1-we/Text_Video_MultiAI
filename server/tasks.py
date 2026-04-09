@@ -246,8 +246,16 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
         scenes = asyncio.run(engine.generate_batch(scenes))
 
         # 3. Generate video clips (sequential — single A100)
-        router = VideoRouter(quality=cfg.get("quality", "high"))
-        clip_paths = router.generate_all(scenes, resume=cfg.get("resume", True))
+        router = VideoRouter(
+            quality=cfg.get("quality", "high"),
+            output_dir=str(out_dir / "scenes"),
+            api_fallback=cfg.get("api_fallback", True),
+        )
+        clip_paths = router.generate_all(
+            scenes,
+            preferred_model=cfg.get("preferred_model"),
+            resume=cfg.get("resume", True),
+        )
         router.cleanup()
 
         # 4. Audio

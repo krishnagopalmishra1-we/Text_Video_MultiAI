@@ -13,7 +13,7 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_MODEL_ID = "Wan-AI/Wan2.1-T2V-14B"
+_DEFAULT_MODEL_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 
 
 class Wan2Runner:
@@ -33,19 +33,30 @@ class Wan2Runner:
             raise ImportError("Install: pip install diffusers transformers accelerate")
 
         logger.info("Loading Wan2.1-14B (bfloat16)…")
-        self.pipe = WanPipeline.from_pretrained(
-            _MODEL_ID,
-            torch_dtype=self.dtype,
-            variant="bf16",
-        ).to(self.device)
+        model_id = self.cfg.get("hf_id", _DEFAULT_MODEL_ID)
+        try:
+            self.pipe = WanPipeline.from_pretrained(
+                model_id,
+                torch_dtype=self.dtype,
+                variant="bf16",
+            ).to(self.device)
+        except Exception as e:
+            # Some repos do not publish a bf16 variant name even when bf16 weights exist.
+            logger.warning(f"Wan2 load with variant=bf16 failed, retrying without variant: {e}")
+            self.pipe = WanPipeline.from_pretrained(
+                model_id,
+                torch_dtype=self.dtype,
+            ).to(self.device)
 
         if self.cfg.get("flash_attention"):
-            try:
-                self.pipe.enable_xformers_memory_efficient_attention()
-            except Exception:
-                pass
+            logger.info("Skipping xformers memory-efficient attention for Wan2; it is unstable with this pipeline build.")
 
         if self.cfg.get("compile"):
+            # Keep compile enabled for speed, but allow safe eager fallback if
+            # Triton/Inductor compilation fails at runtime.
+            import torch._dynamo
+
+            torch._dynamo.config.suppress_errors = True
             self.pipe.transformer = torch.compile(
                 self.pipe.transformer,
                 mode="max-autotune",
@@ -72,7 +83,7 @@ class Wan2Runner:
         width: int = 1280,
         height: int = 720,
         guidance_scale: float = 5.0,
-        num_inference_steps: int = 50,
+        num_inference_steps: int = 25,
         seed: int | None = None,
     ) -> Path:
         from diffusers.utils import export_to_video

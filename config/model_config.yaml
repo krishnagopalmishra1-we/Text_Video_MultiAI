@@ -7,14 +7,14 @@ models:
     wan2:
       enabled: true
       priority: 1
-      hf_id: "Wan-AI/Wan2.1-T2V-14B"
+      hf_id: "Wan-AI/Wan2.1-T2V-14B-Diffusers"
       vram_gb: 40
       dtype: bfloat16
       max_frames: 81        # ~5s @ 16fps or ~10s @ 8fps
       fps: 16
       resolution: [1280, 720]
-      compile: false        # torch.compile needs python3-dev headers; disabled
-      flash_attention: true
+      compile: true         # torch.compile: ~20-30% speedup; image includes 3.10/3.11 dev headers
+      flash_attention: false
       offload: false
       notes: "Best quality. Primary model."
 

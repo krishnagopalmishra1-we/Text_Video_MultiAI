@@ -68,6 +68,14 @@ nano .env
 docker compose up -d --build
 ```
 
+Recommended `.env` keys on the VM:
+
+```bash
+ANTHROPIC_API_KEY=...
+RUNWAY_API_KEY=...
+HF_TOKEN=...   # recommended for faster Hugging Face downloads and higher rate limits
+```
+
 ## 4) Verify deployment
 
 ```bash

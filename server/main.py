@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -30,6 +31,9 @@ app = FastAPI(
     version="1.0.0",
     description="Multi-model AI long-form video generation system",
 )
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/app", StaticFiles(directory=str(STATIC_DIR)), name="app")
 
 
 @app.on_event("startup")
@@ -49,6 +53,8 @@ class VideoJobRequest(BaseModel):
     script: str = Field(..., min_length=10)
     style: str = Field(default="cinematic")
     quality: str = Field(default="high")           # high | fast | preview
+    preferred_model: Optional[str] = Field(default=None)  # wan2 | hunyuan | cogvideox | ltx
+    api_fallback: bool = Field(default=True)        # Runway fallback only after local failures
     pacing: str = Field(default="normal")          # slow | normal | fast
     transition: str = Field(default="crossfade")
     min_clip: float = Field(default=5.0)
@@ -85,6 +91,14 @@ class JobStatusResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=500, detail="UI not found")
+    return index_path.read_text(encoding="utf-8")
 
 
 @app.post("/generate_video", response_model=JobStatusResponse)
