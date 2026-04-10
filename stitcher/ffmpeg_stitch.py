@@ -48,6 +48,34 @@ def _scale_filter(w: int, h: int) -> str:
     return f"scale={w}:{h}:flags=lanczos,setsar=1"
 
 
+def _nvenc_available() -> bool:
+    """Check if NVENC encoder exists and can actually initialize."""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if "h264_nvenc" not in result.stdout:
+            return False
+
+        # Some environments expose h264_nvenc in ffmpeg, but runtime init still fails.
+        probe = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-y",
+                "-f", "lavfi", "-i", "testsrc=size=128x72:rate=1",
+                "-frames:v", "1",
+                "-c:v", "h264_nvenc",
+                "-f", "null", "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return probe.returncode == 0
+    except Exception:
+        return False
+
+
 class Stitcher:
     def __init__(
         self,
@@ -62,9 +90,63 @@ class Stitcher:
 
         self.gen_cfg = cfg["generation"]
         self.cpu_threads = cpu_threads
-        self.codec = self.gen_cfg.get("codec", "libx264")
         self.crf = self.gen_cfg.get("crf", 18)
         self.preset = self.gen_cfg.get("preset", "slow")
+
+        # Use NVENC if available (5-10x faster encoding, same quality)
+        if _nvenc_available():
+            self.codec = "h264_nvenc"
+            self.preset = "p7"  # nvenc highest quality preset
+            self.crf_flag = "-cq"  # nvenc uses -cq instead of -crf
+            logger.info("Using NVENC hardware encoder (h264_nvenc).")
+        else:
+            self.codec = self.gen_cfg.get("codec", "libx264")
+            self.crf_flag = "-crf"
+            logger.info(f"Using software encoder ({self.codec}).")
+
+    def _fallback_to_software_encoder(self) -> None:
+        """Switch to a safe software codec if hardware encode fails at runtime."""
+        if self.codec == "h264_nvenc":
+            self.codec = "libx264"
+            self.crf_flag = "-crf"
+            self.preset = self.gen_cfg.get("preset", "slow")
+            logger.warning("NVENC runtime init failed; falling back to libx264.")
+
+    def _run_encode_with_fallback(self, cmd: list[str]) -> None:
+        """Run ffmpeg encode and retry once with libx264 if NVENC fails."""
+        try:
+            self._run(cmd)
+            return
+        except RuntimeError as e:
+            msg = str(e)
+            nvenc_runtime_fail = (
+                self.codec == "h264_nvenc"
+                and (
+                    "No capable devices found" in msg
+                    or "OpenEncodeSessionEx failed" in msg
+                    or "Error while opening encoder" in msg
+                )
+            )
+            if not nvenc_runtime_fail:
+                raise
+
+            self._fallback_to_software_encoder()
+            retry_cmd = ["libx264" if t == "h264_nvenc" else t for t in cmd]
+            normalized: list[str] = []
+            i = 0
+            while i < len(retry_cmd):
+                token = retry_cmd[i]
+                if token == "-cq":
+                    normalized.extend(["-crf", str(self.crf)])
+                    i += 2
+                    continue
+                if token == "-preset" and i + 1 < len(retry_cmd) and retry_cmd[i + 1] == "p7":
+                    normalized.extend(["-preset", self.preset])
+                    i += 2
+                    continue
+                normalized.append(token)
+                i += 1
+            self._run(normalized)
 
     # ------------------------------------------------------------------
     # Public
@@ -171,12 +253,12 @@ class Stitcher:
     # ------------------------------------------------------------------
 
     def _normalize_clip(self, src: Path, dst: Path, w: int, h: int, fps: int) -> None:
-        self._run([
+        self._run_encode_with_fallback([
             "ffmpeg", "-y",
             "-i", str(src),
             "-vf", f"{_scale_filter(w, h)},fps={fps}",
             "-c:v", self.codec,
-            "-crf", str(self.crf),
+            self.crf_flag, str(self.crf),
             "-preset", self.preset,
             "-an",
             "-threads", str(self.cpu_threads),
@@ -221,13 +303,13 @@ class Stitcher:
             "-filter_complex", filter_complex,
             "-map", "[outv]",
             "-c:v", self.codec,
-            "-crf", str(self.crf),
+            self.crf_flag, str(self.crf),
             "-preset", self.preset,
             "-threads", str(self.cpu_threads),
             "-movflags", "+faststart",
             str(dst),
         ]
-        self._run(cmd)
+        self._run_encode_with_fallback(cmd)
 
     def _attach_audio(self, video: Path, audio: Path, dst: Path) -> None:
         self._run([

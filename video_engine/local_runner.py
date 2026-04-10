@@ -45,6 +45,7 @@ class LocalRunner:
             cfg = yaml.safe_load(f)
 
         self.model_cfgs: dict = cfg["models"]["local"]
+        self.quality_presets: dict = cfg.get("quality_presets", {})
         self._runners: dict[str, Wan2Runner | HunyuanRunner | CogVideoXRunner | LTXRunner] = {}
         self._active_model: str | None = None
 
@@ -68,7 +69,7 @@ class LocalRunner:
         scene: SceneData,
         output_dir: str | Path = "outputs/scenes",
         preferred_model: str | None = None,
-        quality: str = "high",    # high | fast | preview
+        quality: str = "high",    # ultra | high | balanced | fast | preview
         seed: int | None = None,
     ) -> Path:
         """Generate a single scene clip. Returns path to output MP4."""
@@ -81,14 +82,23 @@ class LocalRunner:
         runner = self._runners[model_name]
         mcfg = self.model_cfgs[model_name]
 
-        logger.info(f"Scene {scene.scene_id} → {model_name}")
+        # Apply quality preset overrides (resolution, steps)
+        preset = self.quality_presets.get(quality, {}).get(model_name, {})
+        width, height = preset.get("resolution", mcfg["resolution"])
+        steps = preset.get("steps", mcfg.get("default_steps", 20))
+
+        logger.info(
+            f"Scene {scene.scene_id} → {model_name} "
+            f"({width}x{height}, {steps} steps, quality={quality})"
+        )
         return runner.generate(
             prompt=scene.video_prompt or scene.text,
             duration=scene.duration,
             output_path=out_path,
             fps=mcfg.get("fps"),
-            width=mcfg["resolution"][0],
-            height=mcfg["resolution"][1],
+            width=width,
+            height=height,
+            num_inference_steps=steps,
             seed=seed if seed is not None else scene.scene_id,
         )
 
@@ -106,13 +116,13 @@ class LocalRunner:
         free = _free_vram_gb()
         logger.debug(f"Free VRAM: {free:.1f} GB")
 
-        # Quality → preferred model hint
+        # Quality → preferred model hint (only if user didn't specify)
         if preferred is None:
             if quality == "preview":
                 preferred = "ltx"
             elif quality == "fast":
                 preferred = "cogvideox"
-            # high/default: use priority order
+            # ultra, high, balanced: use priority order (wan2 > hunyuan > ...)
 
         candidates = (
             [preferred] + self._priority_order

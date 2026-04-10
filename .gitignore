@@ -41,3 +41,7 @@ docker-compose.override.yml
 
 # Logs
 *.log
+
+# Local debug scratch files
+tmp_*.py
+tmp_*.json

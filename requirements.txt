@@ -16,7 +16,7 @@ torch>=2.4.0
 torchvision>=0.19.0
 
 # ── Diffusers / HuggingFace ──────────────────────────────────────
-diffusers>=0.32.0
+diffusers>=0.33.0          # 0.33.0+ required for TeaCache hooks
 transformers>=4.45.0
 accelerate>=0.34.0
 huggingface_hub>=0.25.0
@@ -29,6 +29,11 @@ safetensors>=0.4.4
 # ── Flash Attention (A100 native) ────────────────────────────────
 # Install separately: pip install flash-attn --no-build-isolation
 xformers>=0.0.28
+
+# ── Multi-GPU sequence parallelism (xDiT) ────────────────────────
+# Enables 2-8x A100 parallel inference via DiT sequence parallelism
+# Install separately on multi-GPU nodes: pip install xdit
+# xdit>=0.4.0  # uncomment when scaling to multi-GPU
 
 # ── Audio ────────────────────────────────────────────────────────
 kokoro>=0.9.4

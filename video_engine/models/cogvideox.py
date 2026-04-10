@@ -36,7 +36,8 @@ class CogVideoXRunner:
             torch_dtype=self.dtype,
         ).to(self.device)
 
-        self.pipe.enable_model_cpu_offload()
+        if self.cfg.get("offload") == "cpu":
+            self.pipe.enable_model_cpu_offload()
         self.pipe.vae.enable_tiling()
         self.pipe.vae.enable_slicing()
 
@@ -48,7 +49,7 @@ class CogVideoXRunner:
 
         if self.cfg.get("compile"):
             self.pipe.transformer = torch.compile(
-                self.pipe.transformer, mode="reduce-overhead", backend="inductor"
+                self.pipe.transformer, mode="max-autotune", backend="inductor"
             )
         logger.info("CogVideoX-5B loaded.")
 
@@ -81,7 +82,7 @@ class CogVideoXRunner:
         num_frames = min(int(duration * _fps) + 1, self.cfg.get("max_frames", 49))
 
         gen = (
-            torch.Generator(device=self.device).manual_seed(seed)
+            torch.Generator(device="cpu").manual_seed(seed)
             if seed is not None
             else None
         )

@@ -52,7 +52,7 @@ def on_startup():
 class VideoJobRequest(BaseModel):
     script: str = Field(..., min_length=10)
     style: str = Field(default="cinematic")
-    quality: str = Field(default="high")           # high | fast | preview
+    quality: str = Field(default="high")           # ultra | high | balanced | fast | preview
     preferred_model: Optional[str] = Field(default=None)  # wan2 | hunyuan | cogvideox | ltx
     api_fallback: bool = Field(default=True)        # Runway fallback only after local failures
     pacing: str = Field(default="normal")          # slow | normal | fast

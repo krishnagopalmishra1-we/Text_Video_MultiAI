@@ -14,7 +14,10 @@ models:
       fps: 16
       resolution: [1280, 720]
       compile: true         # torch.compile: ~20-30% speedup; image includes 3.10/3.11 dev headers
-      flash_attention: false
+      flash_attention: true  # FA2 via pipe.transformer.enable_flash_attn(); fallback to xformers
+      teacache: true         # Step-skipping cache: ~1.5-2x throughput, minimal quality loss
+      teacache_thresh: 0.1   # 0.1=high quality, 0.2=faster, 0.3=fastest
+      default_steps: 20      # Flow-matching: 20 steps ≈ 50 steps quality for Wan2
       offload: false
       notes: "Best quality. Primary model."
 
@@ -27,9 +30,9 @@ models:
       max_frames: 129       # ~5s @ 24fps
       fps: 24
       resolution: [1280, 720]
-      compile: false        # HunyuanVideo has own compile path
+      compile: true
       flash_attention: true
-      offload: cpu          # offload text encoder to CPU
+      offload: false
       notes: "Cinema quality. Use for hero scenes."
 
     cogvideox:
@@ -41,7 +44,7 @@ models:
       max_frames: 49        # ~6s @ 8fps
       fps: 8
       resolution: [720, 480]
-      compile: false        # torch.compile needs python3-dev headers; disabled
+      compile: true
       flash_attention: true
       offload: false
       notes: "Fast. Use for bulk scenes."
@@ -55,7 +58,7 @@ models:
       max_frames: 121       # ~5s @ 24fps
       fps: 24
       resolution: [768, 512]
-      compile: false        # torch.compile needs python3-dev headers; skip for inference
+      compile: true
       flash_attention: false
       offload: false
       notes: "Fastest. Preview and fallback."
@@ -86,3 +89,37 @@ generation:
   crf: 18
   preset: slow
   cpu_threads: 48
+
+# Quality presets — user selects one; resolution/steps/model are derived.
+# Each preset maps to per-model overrides applied at generation time.
+quality_presets:
+  ultra:
+    label: "Ultra (1280×720, max steps)"
+    wan2:    { resolution: [1280, 720], steps: 50 }
+    hunyuan: { resolution: [1280, 720], steps: 50 }
+    cogvideox: { resolution: [720, 480], steps: 50 }
+    ltx:     { resolution: [768, 512], steps: 30 }
+  high:
+    label: "High (1280×720)"
+    wan2:    { resolution: [1280, 720], steps: 20 }
+    hunyuan: { resolution: [1280, 720], steps: 50 }
+    cogvideox: { resolution: [720, 480], steps: 50 }
+    ltx:     { resolution: [768, 512], steps: 20 }
+  balanced:
+    label: "Balanced (848×480, faster)"
+    wan2:    { resolution: [848, 480], steps: 20 }
+    hunyuan: { resolution: [848, 480], steps: 30 }
+    cogvideox: { resolution: [720, 480], steps: 30 }
+    ltx:     { resolution: [768, 512], steps: 20 }
+  fast:
+    label: "Fast (848×480, fewer steps)"
+    wan2:    { resolution: [848, 480], steps: 15 }
+    hunyuan: { resolution: [848, 480], steps: 20 }
+    cogvideox: { resolution: [480, 320], steps: 25 }
+    ltx:     { resolution: [512, 320], steps: 15 }
+  preview:
+    label: "Preview (480×320, draft)"
+    wan2:    { resolution: [480, 320], steps: 10 }
+    hunyuan: { resolution: [480, 320], steps: 15 }
+    cogvideox: { resolution: [480, 320], steps: 20 }
+    ltx:     { resolution: [512, 320], steps: 10 }

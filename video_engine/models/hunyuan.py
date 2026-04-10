@@ -33,7 +33,7 @@ class HunyuanRunner:
         except ImportError:
             raise ImportError("Install diffusers>=0.32.0")
 
-        logger.info("Loading HunyuanVideo (bfloat16, CPU text-encoder offload)…")
+        logger.info("Loading HunyuanVideo (A100 optimized, bfloat16)…")
         transformer = HunyuanVideoTransformer3DModel.from_pretrained(
             _MODEL_ID,
             subfolder="transformer",
@@ -42,18 +42,28 @@ class HunyuanRunner:
         self.pipe = HunyuanVideoPipeline.from_pretrained(
             _MODEL_ID,
             transformer=transformer,
-            torch_dtype=torch.float16,
+            torch_dtype=self.dtype,
         )
-        # Offload text encoder to CPU to save ~8GB VRAM
-        self.pipe.text_encoder.to("cpu")
-        self.pipe.vae.enable_tiling()
         self.pipe.to(self.device)
+        self.pipe.vae.enable_tiling()
+        if self.cfg.get("offload") == "cpu":
+            # Optional fallback: keep text encoder on CPU to save VRAM.
+            # Must come after pipe.to(self.device) so only the text encoder
+            # is moved back, leaving the rest of the pipeline on the GPU.
+            self.pipe.text_encoder.to("cpu")
 
         if self.cfg.get("flash_attention"):
             try:
                 self.pipe.transformer.enable_flash_attn()
             except Exception:
                 pass
+
+        if self.cfg.get("compile"):
+            self.pipe.transformer = torch.compile(
+                self.pipe.transformer,
+                mode="max-autotune",
+                backend="inductor",
+            )
         logger.info("HunyuanVideo loaded.")
 
     def unload(self) -> None:
@@ -84,6 +94,9 @@ class HunyuanRunner:
         _fps = fps or self.cfg.get("fps", 24)
         num_frames = min(int(duration * _fps) + 1, self.cfg.get("max_frames", 129))
 
+        # Use a CPU generator for deterministic, device-independent seeds.
+        # A CUDA generator can produce different random streams across devices;
+        # the CPU generator yields identical sequences regardless of GPU model.
         gen = (
             torch.Generator(device="cpu").manual_seed(seed)
             if seed is not None

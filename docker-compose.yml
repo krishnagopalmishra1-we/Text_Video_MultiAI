@@ -21,6 +21,7 @@ services:
       - DATABASE_URL=sqlite:///./outputs/jobs.db
     env_file: .env
     volumes:
+      - .:/app
       - ./outputs:/app/outputs
       - hf_cache:/root/.cache/huggingface
     depends_on:
@@ -50,8 +51,10 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DATABASE_URL=sqlite:///./outputs/jobs.db
+      - TORCHINDUCTOR_CACHE_DIR=/app/outputs/.torch_cache
     env_file: .env
     volumes:
+      - .:/app
       - ./outputs:/app/outputs
       - hf_cache:/root/.cache/huggingface
     depends_on:
@@ -80,6 +83,7 @@ services:
       - DATABASE_URL=sqlite:///./outputs/jobs.db
     env_file: .env
     volumes:
+      - .:/app
       - ./outputs:/app/outputs
       - hf_cache:/root/.cache/huggingface
     depends_on:

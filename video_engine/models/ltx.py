@@ -70,7 +70,7 @@ class LTXRunner:
         num_frames = min(int(duration * _fps) + 1, self.cfg.get("max_frames", 121))
 
         gen = (
-            torch.Generator(device=self.device).manual_seed(seed)
+            torch.Generator(device="cpu").manual_seed(seed)
             if seed is not None
             else None
         )

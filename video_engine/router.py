@@ -19,7 +19,7 @@ from api.runway import RunwayNoCreditsError
 
 logger = logging.getLogger(__name__)
 
-QualityMode = Literal["high", "fast", "preview"]
+QualityMode = Literal["ultra", "high", "balanced", "fast", "preview"]
 
 
 class VideoRouter:

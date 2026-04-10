@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from celery import Celery
+from celery.signals import worker_process_init
 from sqlmodel import Session, select
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,33 @@ celery_app.conf.update(
         "server.tasks.run_pipeline": {"queue": "gpu"},
     },
 )
+
+
+# Pre-load and warmup the primary model on GPU worker startup
+# so torch.compile overhead is paid once, not on every job.
+@worker_process_init.connect
+def _warmup_gpu_worker(**kwargs):
+    import os
+    queue = os.environ.get("CELERY_QUEUES", "")
+    # Only warmup on GPU workers
+    if "cpu" in queue:
+        return
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        import yaml
+        with open("config/model_config.yaml") as f:
+            cfg = yaml.safe_load(f)
+        wan_cfg = cfg.get("models", {}).get("local", {}).get("wan2", {})
+        if not wan_cfg.get("enabled"):
+            return
+        from video_engine.models.wan2 import Wan2Runner
+        runner = Wan2Runner(wan_cfg)
+        runner.warmup()
+        logger.info("GPU worker warmup complete.")
+    except Exception as e:
+        logger.warning(f"GPU worker warmup failed (non-fatal): {e}")
 
 
 @celery_app.task(
@@ -251,11 +279,101 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
             output_dir=str(out_dir / "scenes"),
             api_fallback=cfg.get("api_fallback", True),
         )
-        clip_paths = router.generate_all(
-            scenes,
-            preferred_model=cfg.get("preferred_model"),
-            resume=cfg.get("resume", True),
-        )
+        clip_paths = []
+        resume = cfg.get("resume", True)
+        preferred_model = cfg.get("preferred_model")
+
+        for scene in scenes:
+            out_path = out_dir / "scenes" / f"scene_{scene.scene_id:04d}.mp4"
+
+            with Session(db_engine) as session:
+                db_scene = session.exec(
+                    select(Scene).where(
+                        Scene.job_id == job_id,
+                        Scene.scene_id == scene.scene_id,
+                    )
+                ).first()
+
+                if resume and out_path.exists():
+                    if db_scene:
+                        db_scene.status = "done"
+                        db_scene.clip_path = str(out_path)
+                        db_scene.updated_at = datetime.utcnow()
+                        session.add(db_scene)
+
+                    job = session.get(Job, job_id)
+                    if job:
+                        done_scenes = session.exec(
+                            select(Scene).where(
+                                Scene.job_id == job_id,
+                                Scene.status == "done",
+                            )
+                        ).all()
+                        job.completed_scenes = len(done_scenes)
+                        job.updated_at = datetime.utcnow()
+                        session.add(job)
+                    session.commit()
+
+                    clip_paths.append(out_path)
+                    continue
+
+                if db_scene:
+                    db_scene.status = "running"
+                    db_scene.updated_at = datetime.utcnow()
+                    session.add(db_scene)
+                    session.commit()
+
+            try:
+                clip_path = router.generate_scene(
+                    scene,
+                    preferred_model=preferred_model,
+                    seed=scene.scene_id,
+                )
+            except Exception as e:
+                with Session(db_engine) as session:
+                    db_scene = session.exec(
+                        select(Scene).where(
+                            Scene.job_id == job_id,
+                            Scene.scene_id == scene.scene_id,
+                        )
+                    ).first()
+                    if db_scene:
+                        db_scene.status = "failed"
+                        db_scene.error = str(e)[:500]
+                        db_scene.updated_at = datetime.utcnow()
+                        session.add(db_scene)
+                        session.commit()
+                raise
+
+            with Session(db_engine) as session:
+                db_scene = session.exec(
+                    select(Scene).where(
+                        Scene.job_id == job_id,
+                        Scene.scene_id == scene.scene_id,
+                    )
+                ).first()
+                if db_scene:
+                    db_scene.status = "done"
+                    db_scene.clip_path = str(clip_path)
+                    db_scene.updated_at = datetime.utcnow()
+                    session.add(db_scene)
+
+                job = session.get(Job, job_id)
+                if job:
+                    done_scenes = session.exec(
+                        select(Scene).where(
+                            Scene.job_id == job_id,
+                            Scene.status == "done",
+                        )
+                    ).all()
+                    job.completed_scenes = len(done_scenes)
+                    job.updated_at = datetime.utcnow()
+                    session.add(job)
+
+                session.commit()
+
+            clip_paths.append(clip_path)
+
         router.cleanup()
 
         # 4. Audio
