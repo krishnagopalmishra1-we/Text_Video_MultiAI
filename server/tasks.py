@@ -6,6 +6,7 @@ Workers:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -40,6 +41,12 @@ celery_app.conf.update(
         "server.tasks.generate_audio": {"queue": "cpu"},
         "server.tasks.stitch_video": {"queue": "cpu"},
         "server.tasks.run_pipeline": {"queue": "gpu"},
+        # DAG tasks
+        "server.tasks.split_and_prompt": {"queue": "cpu"},
+        "server.tasks.generate_all_clips": {"queue": "gpu"},
+        "server.tasks.upscale_clips": {"queue": "gpu"},
+        "server.tasks.generate_audio_task": {"queue": "cpu"},
+        "server.tasks.stitch_final": {"queue": "cpu"},
     },
 )
 
@@ -439,3 +446,305 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
         logger.exception(f"Pipeline failed for job {job_id}")
         _update_job("failed", error=str(e)[:1000])
         raise
+
+
+# ==================================================================
+# Redis pub/sub progress helper
+# ==================================================================
+
+def _publish_progress(job_id: str, **kwargs):
+    """Publish per-step progress to Redis channel for WebSocket relay."""
+    try:
+        import redis as _redis
+        r = _redis.from_url(_BROKER, decode_responses=True)
+        r.publish(f"progress:{job_id}", json.dumps(kwargs))
+    except Exception:
+        pass  # non-critical — don't break generation
+
+
+def _step_progress_callback(job_id: str, scene_id: int, total_scenes: int):
+    """Return a callback_on_step_end function for diffusion progress."""
+    def callback(pipe, step, timestep, callback_kwargs):
+        _publish_progress(
+            job_id,
+            type="step",
+            scene_id=scene_id,
+            step=step,
+            total_scenes=total_scenes,
+        )
+        return callback_kwargs
+    return callback
+
+
+# ==================================================================
+# DAG pipeline tasks — used by pipeline/dag.py
+# ==================================================================
+
+@celery_app.task(name="server.tasks.split_and_prompt", bind=True, max_retries=2)
+def split_and_prompt(self, job_id: str, config: dict) -> list[dict]:
+    """Step 1+2: Split script into scenes and generate video prompts (CPU)."""
+    import asyncio
+    from scene_splitter import SceneSplitter
+    from prompt_engine import PromptEngine
+    from db.models import Job, Scene, engine as db_engine
+
+    cfg = config
+    splitter = SceneSplitter(
+        pacing=cfg.get("pacing", "normal"),
+        min_duration=cfg.get("min_clip", 5),
+        max_duration=cfg.get("max_clip", 20),
+    )
+    scenes = splitter.split(cfg["script"])
+
+    # Persist scenes to DB
+    with Session(db_engine) as session:
+        job = session.get(Job, job_id)
+        if job:
+            job.status = "running"
+            job.total_scenes = len(scenes)
+            job.updated_at = datetime.utcnow()
+            session.add(job)
+        for s in scenes:
+            session.add(Scene(
+                job_id=job_id, scene_id=s.scene_id,
+                text=s.text, duration=s.duration,
+            ))
+        session.commit()
+
+    # Generate prompts
+    engine = PromptEngine(style=cfg.get("style", "cinematic"))
+    enriched = asyncio.run(engine.generate_batch(scenes))
+
+    _publish_progress(job_id, type="phase", phase="prompts_done", count=len(enriched))
+    return [s.to_dict() for s in enriched]
+
+
+@celery_app.task(name="server.tasks.generate_all_clips", bind=True, max_retries=1, queue="gpu")
+def generate_all_clips(self, scenes_json: list[dict], job_id: str, config: dict) -> list[str]:
+    """Step 3: Generate all video clips sequentially on GPU."""
+    import yaml as _yaml
+    from scene_splitter import SceneData
+    from db.models import Job, Scene, engine as db_engine
+
+    cfg = config
+    strategy = cfg.get("strategy", "balanced")
+    out_dir = Path("outputs") / job_id / "scenes"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    router = _get_video_router(quality=cfg.get("quality", "high"))
+    scenes = [SceneData(**s) for s in scenes_json]
+
+    # Determine hero scenes
+    with open("config/model_config.yaml") as _f:
+        strat_cfg = _yaml.safe_load(_f).get("strategies", {}).get(strategy, {})
+    hero_ids_cfg = strat_cfg.get("hero_scene_ids", [])
+    if hero_ids_cfg == "auto":
+        hero_scene_ids = {scenes[0].scene_id, scenes[-1].scene_id} if scenes else set()
+    elif hero_ids_cfg:
+        hero_scene_ids = set(hero_ids_cfg)
+    else:
+        hero_scene_ids = set()
+
+    clip_paths = []
+    for scene in scenes:
+        out_path = out_dir / f"scene_{scene.scene_id:04d}.mp4"
+
+        # Resume check
+        if cfg.get("resume", True) and out_path.exists():
+            clip_paths.append(str(out_path))
+            continue
+
+        # Update scene status
+        with Session(db_engine) as session:
+            db_scene = session.exec(
+                select(Scene).where(Scene.job_id == job_id, Scene.scene_id == scene.scene_id)
+            ).first()
+            if db_scene:
+                db_scene.status = "running"
+                db_scene.updated_at = datetime.utcnow()
+                session.add(db_scene)
+                session.commit()
+
+        try:
+            clip_path = router.generate_scene(
+                scene,
+                preferred_model=cfg.get("preferred_model"),
+                seed=scene.scene_id,
+                is_hero=scene.scene_id in hero_scene_ids,
+            )
+        except Exception as e:
+            with Session(db_engine) as session:
+                db_scene = session.exec(
+                    select(Scene).where(Scene.job_id == job_id, Scene.scene_id == scene.scene_id)
+                ).first()
+                if db_scene:
+                    db_scene.status = "failed"
+                    db_scene.error = str(e)[:500]
+                    db_scene.updated_at = datetime.utcnow()
+                    session.add(db_scene)
+                    session.commit()
+            raise
+
+        # Mark done
+        with Session(db_engine) as session:
+            db_scene = session.exec(
+                select(Scene).where(Scene.job_id == job_id, Scene.scene_id == scene.scene_id)
+            ).first()
+            if db_scene:
+                db_scene.status = "done"
+                db_scene.clip_path = str(clip_path)
+                db_scene.updated_at = datetime.utcnow()
+                session.add(db_scene)
+            job = session.get(Job, job_id)
+            if job:
+                job.completed_scenes = len(clip_paths) + 1
+                job.updated_at = datetime.utcnow()
+                session.add(job)
+            session.commit()
+
+        clip_paths.append(str(clip_path))
+        _publish_progress(
+            job_id, type="clip_done",
+            scene_id=scene.scene_id, done=len(clip_paths), total=len(scenes),
+        )
+
+    router.cleanup()
+    return clip_paths
+
+
+@celery_app.task(name="server.tasks.upscale_clips", bind=True, max_retries=1, queue="gpu")
+def upscale_clips(self, clip_paths_or_prev: list[str] | None, job_id: str, config: dict) -> list[str]:
+    """Step 4a: Upscale clips if strategy requires it (GPU)."""
+    import yaml as _yaml
+
+    strategy = config.get("strategy", "balanced")
+    with open("config/model_config.yaml") as _f:
+        strat_cfg = _yaml.safe_load(_f).get("strategies", {}).get(strategy, {})
+
+    if not strat_cfg.get("upscale", False):
+        logger.info(f"Strategy '{strategy}' — upscale disabled, skipping")
+        return clip_paths_or_prev or []
+
+    from video_engine.upscaler import Upscaler
+
+    target_w, target_h = strat_cfg.get("output_resolution", [1280, 720])
+    upscaler = Upscaler()
+
+    out_dir = Path("outputs") / job_id / "upscaled"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    clip_paths = clip_paths_or_prev or []
+    upscaled = []
+    for cp in clip_paths:
+        p = Path(cp)
+        out = out_dir / p.name
+        try:
+            result = upscaler.upscale_clip(p, out, target_width=target_w, target_height=target_h)
+            upscaled.append(str(result))
+        except Exception as e:
+            logger.warning(f"Upscale failed for {p.name}: {e} — using original")
+            upscaled.append(cp)
+
+    _publish_progress(job_id, type="phase", phase="upscale_done", count=len(upscaled))
+    return upscaled
+
+
+@celery_app.task(name="server.tasks.generate_audio_task", bind=True, max_retries=2)
+def generate_audio_task(self, job_id: str, config: dict) -> dict:
+    """Step 4b: Generate TTS + music (CPU, runs in parallel with upscale)."""
+    from scene_splitter import SceneData
+    from audio import TTSEngine, MusicEngine, AudioSync
+    from db.models import Scene, engine as db_engine
+
+    out_dir = Path("outputs") / job_id / "audio"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Retrieve scenes from DB
+    with Session(db_engine) as session:
+        db_scenes = session.exec(
+            select(Scene).where(Scene.job_id == job_id).order_by(Scene.scene_id)
+        ).all()
+        scenes = [
+            SceneData(
+                scene_id=s.scene_id, text=s.text, duration=s.duration,
+                word_count=len(s.text.split()), video_prompt=s.text, narration=s.text,
+            )
+            for s in db_scenes
+        ]
+
+    total_dur = sum(s.duration for s in scenes)
+
+    tts = TTSEngine()
+    narration = tts.synthesize_full(scenes, out_dir / "narration.wav")
+
+    music_engine = MusicEngine()
+    music = music_engine.generate_for_video(
+        config.get("style", "cinematic"), total_dur, out_dir / "music.wav"
+    )
+    music_engine.unload()
+
+    syncer = AudioSync()
+    final_audio = syncer.mix(narration, music, out_dir / "mixed.aac", total_dur, scenes)
+
+    _publish_progress(job_id, type="phase", phase="audio_done")
+    return {"audio_path": str(final_audio), "duration": total_dur}
+
+
+@celery_app.task(name="server.tasks.stitch_final", bind=True, max_retries=2)
+def stitch_final(self, _prev_results, job_id: str, config: dict) -> str:
+    """Step 5: Quality check + stitch + mux audio (CPU)."""
+    from stitcher import Stitcher
+    from pipeline.quality_check import check_batch
+    from db.models import Job, Scene, engine as db_engine
+
+    out_dir = Path("outputs") / job_id
+
+    # Collect clip paths — prefer upscaled, fall back to raw scenes
+    upscaled_dir = out_dir / "upscaled"
+    scenes_dir = out_dir / "scenes"
+
+    with Session(db_engine) as session:
+        db_scenes = session.exec(
+            select(Scene).where(Scene.job_id == job_id).order_by(Scene.scene_id)
+        ).all()
+
+    clip_paths = []
+    for s in db_scenes:
+        upscaled = upscaled_dir / f"scene_{s.scene_id:04d}.mp4"
+        raw = scenes_dir / f"scene_{s.scene_id:04d}.mp4"
+        clip_paths.append(upscaled if upscaled.exists() else raw)
+
+    # Quality check
+    qc_results = check_batch(clip_paths)
+    failed = [r for r in qc_results if not r.get("passed", True) and not r.get("skipped")]
+    if failed:
+        logger.warning(f"Quality check: {len(failed)}/{len(qc_results)} clips failed: "
+                       f"{[r['path'] for r in failed]}")
+
+    # Get audio path
+    audio_path = out_dir / "audio" / "mixed.aac"
+    if not audio_path.exists():
+        audio_path = None
+
+    # Stitch
+    stitcher = Stitcher()
+    final_video = stitcher.stitch(
+        clip_paths=clip_paths,
+        output_path=out_dir / f"{job_id}_final.mp4",
+        audio_path=str(audio_path) if audio_path else None,
+        transition=config.get("transition", "crossfade"),
+        upscale_to_4k=config.get("upscale_4k", False),
+    )
+
+    # Update job as done
+    with Session(db_engine) as session:
+        job = session.get(Job, job_id)
+        if job:
+            job.status = "done"
+            job.output_path = str(final_video)
+            job.updated_at = datetime.utcnow()
+            session.add(job)
+            session.commit()
+
+    _publish_progress(job_id, type="phase", phase="done", output=str(final_video))
+    return str(final_video)

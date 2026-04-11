@@ -986,23 +986,57 @@ imageio>=2.34.0
 
 ## 8. MIGRATION CHECKLIST
 
-- [ ] Delete all files listed in §1.4
-- [ ] Apply all bug fixes from §3 Phase 0
-- [ ] Update model_config.yaml per §6
-- [ ] Clean requirements.txt per §7
-- [ ] Split Dockerfile into 3 images
-- [ ] Add PostgreSQL to docker-compose.yml
-- [ ] Implement GPU memory manager
-- [ ] Implement DAG pipeline orchestration
-- [ ] Add SageAttention integration
-- [ ] Add PAB + TeaCache + FBCache to WAN runner
-- [ ] Add Real-ESRGAN upscaler module
-- [ ] Add per-step progress via Redis pub/sub
-- [ ] Add automated clip quality checks
-- [ ] Fix xfade offset calculation in transitions.py
-- [ ] Implement singleton model persistence in Celery workers
-- [ ] Remove GPU reservation from API service
-- [ ] Add structured logging
+### Completed (commit 24bcc82)
+
+- [x] Delete all files listed in §1.4 — 14 tmp/smoke/debug files removed
+- [x] **B2**: Fix torch.compile + CPU offload in wan2.py — rewrote `load()` with correct acceleration order, text encoder offloaded after encoding
+- [x] **B5**: VRAM verification after unload in local_runner.py `_switch_model`
+- [x] **B6**: Fix xfade offset calculation in transitions.py
+- [x] **B8**: Migrate to lifespan context manager in server/main.py
+- [x] **B9**: Fix global torch.manual_seed → Generator in audio/music.py
+- [x] **B10**: Fix temp file leak in audio/tts.py with try/finally
+- [x] **B11**: Singleton RunwayClient in video_engine/api_runner.py
+- [x] **B12**: Add logging for LLM errors in prompt_engine/generator.py
+- [x] **B13**: Remove GPU reservation from API service in docker-compose.yml
+- [x] **B15**: Remove dead target_words variable in scene_splitter/splitter.py
+- [x] **B16**: Add VideoRouter singleton (`_get_video_router`) in server/tasks.py
+- [x] **B17**: Fix TTSEngine(backend=...) crash in orchestrator.py
+- [x] SageAttention integration in wan2.py (with FlashAttn2 fallback)
+- [x] PAB (Pyramid Attention Broadcast) applied in wan2.py
+- [x] TeaCache applied in wan2.py
+- [x] FBCache (First-Block Cache) applied in wan2.py
+- [x] torch.compile(max-autotune) after all hooks in wan2.py
+- [x] Per-step progress via callback_on_step_end in wan2.py `generate()`
+- [x] Real-ESRGAN upscaler module created (video_engine/upscaler.py)
+- [x] DAG pipeline orchestration created (pipeline/dag.py) using Celery canvas
+- [x] GPU memory manager created (pipeline/gpu_manager.py)
+- [x] Automated clip quality check created (pipeline/quality_check.py)
+- [x] Enhanced /health endpoint — checks GPU, Redis, DB, disk
+- [x] Clean requirements.txt — removed xformers, librosa, scipy, nltk, tiktoken, rich, psutil, tqdm; added bitsandbytes
+- [x] Fix tts.py to use numpy interp instead of librosa for resampling
+- [x] 3 generation strategies (fast/balanced/quality) wired through full stack: model_config.yaml, UI, main.py, tasks.py, router.py, local_runner.py, orchestrator.py
+- [x] WAN 1.3B model support added (wan2_1b in model_config.yaml + models/__init__.py)
+- [x] HunyuanVideo INT8 quantization (bitsandbytes) — ~37GB instead of ~60GB
+- [x] Singleton model persistence in Celery workers
+- [x] Remove GPU reservation from API service
+- [x] Document updated architecture in README.md, AGENT.md, CLAUDE.md
+- [x] **B1**: Hunyuan hf_id already correct (`hunyuanvideo-community/HunyuanVideo`) in model_config.yaml
+- [x] **B4**: DAG tasks wired into tasks.py (split_and_prompt, generate_all_clips, upscale_clips, generate_audio_task, stitch_final)
+- [x] **B14**: Fix Dockerfile COPY order — output dirs created before COPY
+- [x] Wire DAG pipeline into tasks.py + main.py `/generate_video` (use_dag=True by default)
+- [x] Wire upscaler into DAG flow — `upscale_clips` task reads strategy config, runs Real-ESRGAN
+- [x] Wire quality_check into `stitch_final` — runs check_batch before stitching
+- [x] Per-step progress → Redis pub/sub (`_publish_progress`) → WebSocket relay in ws_progress
+- [x] Add structured logging (structlog) — configured in lifespan, falls back to stdlib
+
+### Not Yet Done
+
+- [ ] **B3**: Hunyuan torch.compile inductor bug — compile=false is workaround, not fix (PyTorch upstream)
+- [ ] **B7**: SQLite → PostgreSQL migration (still using SQLite — requires infra)
+- [ ] Split Dockerfile into 3 images (api, gpu, cpu) — requires infra rebuild
+- [ ] Add PostgreSQL to docker-compose.yml — requires infra
 - [ ] End-to-end integration test: 2-min video, 30-min budget
 - [ ] Load test: concurrent job submission
-- [ ] Document updated architecture in README.md
+- [ ] Phase 3: Multi-GPU / xDiT (requires additional hardware)
+- [ ] Phase 4: Cloud storage (GCS), signed URLs
+- [ ] Phase 5: Scene coherence, temporal overlap, prompt-adaptive model selection

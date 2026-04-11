@@ -9,7 +9,9 @@ Endpoints:
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,6 +26,7 @@ from sqlmodel import Session, select
 
 from db.models import Job, Scene, init_db, get_session
 from server.tasks import run_pipeline, generate_scene_clip
+from pipeline.dag import submit_pipeline as submit_dag_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +34,30 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+
+    # Structured JSON logging via structlog
+    try:
+        import structlog
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.processors.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.StackInfoRenderer(),
+                structlog.processors.format_exc_info,
+                structlog.processors.JSONRenderer(),
+            ],
+            wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+            context_class=dict,
+            logger_factory=structlog.PrintLoggerFactory(),
+            cache_logger_on_first_use=True,
+        )
+    except ImportError:
+        # Fall back to standard logging if structlog not installed
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
     yield
 
 
@@ -66,6 +89,7 @@ class VideoJobRequest(BaseModel):
     max_clip: float = Field(default=20.0)
     upscale_4k: bool = Field(default=False)
     resume: bool = Field(default=True)
+    use_dag: bool = Field(default=True, description="Use DAG pipeline (parallel audio+upscale) instead of monolithic")
 
 
 class SceneRequest(BaseModel):
@@ -169,11 +193,14 @@ def generate_video(
     session.commit()
     session.refresh(job)
 
-    # Submit to Celery
-    run_pipeline.apply_async(
-        args=[job_id, req.model_dump()],
-        task_id=job_id,
-    )
+    # Submit to Celery — DAG (parallel phases) or monolithic
+    if req.use_dag:
+        submit_dag_pipeline(job_id, req.model_dump())
+    else:
+        run_pipeline.apply_async(
+            args=[job_id, req.model_dump()],
+            task_id=job_id,
+        )
 
     return _job_to_response(job)
 
@@ -246,11 +273,36 @@ def download_video(job_id: str, session: Session = Depends(get_session)):
 @app.websocket("/ws/{job_id}")
 async def ws_progress(websocket: WebSocket, job_id: str):
     import asyncio
+    import redis as _redis
     from db.models import engine as db_engine
 
     await websocket.accept()
+
+    # Try Redis pub/sub for real-time step progress
+    r = None
+    pubsub = None
+    try:
+        broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        r = _redis.from_url(broker_url, decode_responses=True)
+        pubsub = r.pubsub()
+        pubsub.subscribe(f"progress:{job_id}")
+    except Exception:
+        pubsub = None
+
     try:
         while True:
+            # Check Redis pub/sub for step-level progress
+            if pubsub:
+                msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+                if msg and msg["type"] == "message":
+                    try:
+                        data = json.loads(msg["data"])
+                        data["job_id"] = job_id
+                        await websocket.send_json(data)
+                    except Exception:
+                        pass
+
+            # Also send DB-level progress periodically
             with Session(db_engine) as session:
                 job = session.get(Job, job_id)
                 if not job:
@@ -268,6 +320,13 @@ async def ws_progress(websocket: WebSocket, job_id: str):
             await asyncio.sleep(2)
     except WebSocketDisconnect:
         pass
+    finally:
+        if pubsub:
+            try:
+                pubsub.unsubscribe()
+                pubsub.close()
+            except Exception:
+                pass
 
 
 # ------------------------------------------------------------------

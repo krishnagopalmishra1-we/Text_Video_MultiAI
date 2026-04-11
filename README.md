@@ -1,13 +1,26 @@
 # Long Video Generator
 
-AI-powered long-form video generation (10–20 min) on a single A100 80GB.
+AI-powered long-form video generation (1–2 min target in ~27 min) on a single A100 80GB.
 
 ## Stack
-- **Video models**: Wan2.1-14B → HunyuanVideo → CogVideoX-5B → LTX-Video → Runway/Pika/Veo/Higgsfield
-- **TTS**: Kokoro (local) + ElevenLabs fallback
+- **Video models**: Wan2.1-14B (primary) · Wan2.1-1.3B (fast) · HunyuanVideo INT8 (hero scenes) · CogVideoX-5B · LTX-Video · Runway (API fallback)
+- **Acceleration**: SageAttention · PAB · TeaCache · FBCache · torch.compile
+- **TTS**: Kokoro (local, 82M params)
 - **Music**: MusicGen-large (local)
-- **Stitch**: FFmpeg (48-thread) + optional Real-ESRGAN 4K upscale
+- **Upscale**: Real-ESRGAN (848×480 → 1280×720)
+- **Stitch**: FFmpeg (48-thread) + optional 4K upscale
 - **API**: FastAPI + Celery + Redis + SQLite
+- **Pipeline**: DAG orchestration (Celery canvas), GPUMemoryManager
+
+## Generation Strategies
+
+| Strategy | Models | Resolution | Time (12 clips) |
+|----------|--------|------------|-----------------|
+| **Fast** | WAN 1.3B | 1280×720 native | ~10 min |
+| **Balanced** | WAN 14B | 848×480 + upscale | ~20 min |
+| **Quality** | WAN 14B + Hunyuan INT8 hero | 848×480 + upscale | ~25 min |
+
+User selects strategy in the UI dropdown. Each strategy is wired through the full stack.
 
 ## Quick Start
 
@@ -16,8 +29,11 @@ AI-powered long-form video generation (10–20 min) on a single A100 80GB.
 # PyTorch for A100 (CUDA 12.4)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
-# Flash Attention
+# Flash Attention (optional — SageAttention preferred)
 pip install flash-attn --no-build-isolation
+
+# SageAttention (1.5-1.7× faster than FA2)
+pip install sageattention
 
 # Project deps
 pip install -r requirements.txt
@@ -36,6 +52,7 @@ python orchestrator.py \
   --script my_script.txt \
   --style cinematic \
   --quality high \
+  --strategy balanced \
   --transition crossfade
 ```
 
@@ -51,10 +68,13 @@ docker-compose up --build
 # Submit job
 curl -X POST http://localhost:8000/generate_video \
   -H "Content-Type: application/json" \
-  -d '{"script": "...", "style": "cinematic", "quality": "high"}'
+  -d '{"script": "...", "style": "cinematic", "strategy": "balanced"}'
 
 # Check status
 curl http://localhost:8000/status/{job_id}
+
+# Health check (GPU/Redis/DB/Disk)
+curl http://localhost:8000/health
 
 # Download
 curl -O http://localhost:8000/download/{job_id}
@@ -76,14 +96,17 @@ Full guide: `deploy/azure/README.md`
 SCRIPT
   ↓ SceneSplitter    — split into 5–20s scenes with timing
   ↓ PromptEngine     — Claude Haiku converts text → video prompt
-  ↓ VideoRouter      — selects model based on VRAM + quality tier
-  ↓   Wan2.1-14B     — primary (40GB VRAM, 1280×720)
-  ↓   HunyuanVideo   — hero scenes (60GB VRAM)
-  ↓   CogVideoX-5B   — fast (24GB VRAM)
-  ↓   LTX-Video      — fastest (10GB VRAM)
-  ↓   API fallback   — Runway / Pika / Veo / Higgsfield
+  ↓ VideoRouter      — selects model based on strategy + VRAM
+  ↓   Wan2.1-14B     — primary (42GB VRAM, 848×480 + upscale)
+  ↓   Wan2.1-1.3B    — fast (8GB VRAM, 1280×720 native)
+  ↓   HunyuanVideo   — hero scenes (37GB VRAM INT8, quality strategy)
+  ↓   CogVideoX-5B   — fallback (24GB VRAM)
+  ↓   LTX-Video      — fastest (10GB VRAM, preview)
+  ↓   Runway Gen-3   — API fallback
+  ↓ Upscaler         — Real-ESRGAN 848×480 → 1280×720
   ↓ Stitcher         — FFmpeg concat + xfade transitions
   ↓ AudioSync        — Kokoro TTS + MusicGen + mix
+  ↓ QualityCheck     — detect black/frozen frames
   ↓ FINAL VIDEO      — 1080p MP4 (optional 4K upscale)
 ```
 
@@ -121,13 +144,14 @@ outputs/{job_id}/
   final/           {job_id}.mp4  (or _4k.mp4)
 ```
 
-## Performance (A100 80GB, 48 cores)
+## Performance (A100 80GB, 48 cores, with acceleration stack)
 
-| Model | VRAM | Speed (10s clip) | Quality |
-|---|---|---|---|
-| Wan2.1-14B | ~40GB | ~3 min | ★★★★★ |
-| HunyuanVideo | ~60GB | ~5 min | ★★★★★ |
-| CogVideoX-5B | ~24GB | ~1.5 min | ★★★★ |
-| LTX-Video | ~10GB | ~30s | ★★★ |
+| Model | VRAM | Speed (5s clip) | Quality | Acceleration |
+|---|---|---|---|---|
+| Wan2.1-14B | ~42GB | ~90s | ★★★★★ | SageAttn + TeaCache + FBCache + compile |
+| Wan2.1-1.3B | ~8GB | ~20s | ★★★ | SageAttn + TeaCache + compile |
+| HunyuanVideo INT8 | ~37GB | ~3 min | ★★★★★ | bitsandbytes INT8 quantization |
+| CogVideoX-5B | ~24GB | ~1.5 min | ★★★★ | standard |
+| LTX-Video | ~10GB | ~15s | ★★★ | standard |
 
-20-minute video @ 10s scenes ≈ 120 scenes ≈ 6h on Wan2.1-14B
+12-clip balanced video ≈ 20 min end-to-end (including TTS, music, stitching).

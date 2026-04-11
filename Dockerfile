@@ -42,11 +42,11 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY scripts/patch_diffusers.py /tmp/patch_diffusers.py
 RUN python /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
 
+# Create output dirs (before COPY so code changes don't invalidate this layer)
+RUN mkdir -p outputs/scenes outputs/final outputs/audio outputs/upscaled
+
 # App code
 COPY . .
-
-# Create output dirs
-RUN mkdir -p outputs/scenes outputs/final outputs/audio outputs/upscaled
 
 # Expose FastAPI port
 EXPOSE 8000
