@@ -106,3 +106,17 @@ outputs/
 - FFmpeg uses `--threads 48` for encode/decode
 - Celery GPU queue: concurrency=1 (GPU single-tenant)
 - Celery CPU queue: concurrency=8 (scale up to 48 for pure CPU tasks)
+
+## Operational Status (2026-04-11)
+- VM `video-gen-a100` in `VIDEO-GEN-RG` was deallocated after testing to stop billing.
+- WAN smoke generation produced valid 5.06s video artifacts at 1280x720.
+- WAN `slow_conv3d_forward` CUDA failure was mitigated by disabling VAE tiling by default in `video_engine/models/wan2.py`.
+- Hunyuan model id path was corrected to `hunyuanvideo-community/HunyuanVideo`.
+- Hunyuan full-quality (`50` steps, 1280x720, 5s) remains unstable in this stack:
+  - `torch.compile` path can fail with invalid huge allocation plans.
+  - non-compile path is stable but can be too slow for smoke window completion.
+- Current smoke artifacts are model-level scene clips only; full pipeline final video with muxed audio was not produced in this smoke pass.
+
+## Cleanup Notes (2026-04-11)
+- Temporary smoke/debug shell scripts and ad-hoc smoke runner files created during troubleshooting were removed from the project root.
+- Only reusable model/runtime code changes and this operational note were retained.

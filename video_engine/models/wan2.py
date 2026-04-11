@@ -21,7 +21,9 @@ class Wan2Runner:
         self.cfg = cfg
         self.pipe = None
         self.device = torch.device("cuda")
-        self.dtype = torch.bfloat16
+        dtype_cfg = str(self.cfg.get("dtype", "bf16")).lower()
+        self.dtype = torch.float16 if dtype_cfg in {"fp16", "float16"} else torch.bfloat16
+        self.variant = "fp16" if self.dtype == torch.float16 else "bf16"
         self._prompt_cache: dict[str, object] = {}
         self._warmed_up = False
 
@@ -39,7 +41,7 @@ class Wan2Runner:
             self.pipe = WanPipeline.from_pretrained(
                 model_id,
                 torch_dtype=self.dtype,
-                variant="bf16",
+                variant=self.variant,
             ).to(self.device)
         except Exception as e:
             logger.warning(f"Wan2 load with variant=bf16 failed, retrying without variant: {e}")
@@ -48,10 +50,11 @@ class Wan2Runner:
                 torch_dtype=self.dtype,
             ).to(self.device)
 
-        # VAE memory optimizations (lossless)
-        self.pipe.vae.enable_tiling()
+        # Tiling hits a slow_conv3d CUDA path on this stack; slicing is sufficient on A100 80GB.
+        if self.cfg.get("vae_tiling", False):
+            self.pipe.vae.enable_tiling()
         self.pipe.vae.enable_slicing()
-        logger.info("VAE tiling + slicing enabled.")
+        logger.info("VAE slicing enabled.%s", " Tiling enabled." if self.cfg.get("vae_tiling", False) else "")
 
         if self.cfg.get("flash_attention"):
             try:
@@ -86,8 +89,9 @@ class Wan2Runner:
                     logger.warning(f"TaylorSeer also unavailable: {e2}")
 
         if self.cfg.get("compile"):
-            import torch._dynamo
-            torch._dynamo.config.suppress_errors = True
+            from torch import _dynamo
+
+            _dynamo.config.suppress_errors = True
             compile_mode = "reduce-overhead" if self.cfg.get("teacache") else "max-autotune"
             self.pipe.transformer = torch.compile(
                 self.pipe.transformer,

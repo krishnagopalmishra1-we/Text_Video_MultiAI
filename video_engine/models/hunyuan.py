@@ -12,7 +12,7 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_MODEL_ID = "tencent/HunyuanVideo"
+_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 
 
 class HunyuanRunner:
@@ -34,13 +34,14 @@ class HunyuanRunner:
             raise ImportError("Install diffusers>=0.32.0")
 
         logger.info("Loading HunyuanVideo (A100 optimized, bfloat16)…")
+        model_id = self.cfg.get("hf_id", _MODEL_ID)
         transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-            _MODEL_ID,
+            model_id,
             subfolder="transformer",
             torch_dtype=torch.bfloat16,
         )
         self.pipe = HunyuanVideoPipeline.from_pretrained(
-            _MODEL_ID,
+            model_id,
             transformer=transformer,
             torch_dtype=self.dtype,
         )

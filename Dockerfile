@@ -9,7 +9,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 python3.10-dev \
     python3.11 python3.11-dev python3-pip \
     build-essential \
     ffmpeg \
@@ -19,30 +18,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 WORKDIR /app
 
 # PyTorch with CUDA 12.4
-RUN pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir \
     torch==2.4.1 torchvision==0.19.1 \
     --index-url https://download.pytorch.org/whl/cu124
 
 # Build helpers needed by flash-attn setup
-RUN pip install --no-cache-dir packaging wheel setuptools ninja
+RUN python -m pip install --no-cache-dir packaging wheel setuptools ninja
 
 # Flash Attention (compiled for A100 sm_80)
-RUN pip install --no-cache-dir flash-attn --no-build-isolation
+RUN python -m pip install --no-cache-dir flash-attn --no-build-isolation
 
 # App requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
 # Patch diffusers attention_dispatch.py: wrap flash_attn_3 custom_op registration in
 # try/except to avoid infer_schema failure with flash-attn>=2.8 string annotations.
 COPY scripts/patch_diffusers.py /tmp/patch_diffusers.py
-# Use python3.10 — pip installs packages into python3.10 even though python3.11 is default
-RUN python3.10 /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
+RUN python /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
 
 # App code
 COPY . .
