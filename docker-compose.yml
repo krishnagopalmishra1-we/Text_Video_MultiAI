@@ -9,12 +9,9 @@ services:
 
   api:
     build: .
-    runtime: nvidia
     ports:
       - "8000:8000"
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - PYTHONPATH=/app
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -27,13 +24,6 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   worker_gpu:
     build: .

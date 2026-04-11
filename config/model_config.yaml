@@ -4,40 +4,58 @@
 
 models:
   local:
-    wan2:
+    wan2_14b:
       enabled: true
       priority: 1
       hf_id: "Wan-AI/Wan2.1-T2V-14B-Diffusers"
-      vram_gb: 40
+      vram_gb: 42
       dtype: bfloat16
-      max_frames: 81        # ~5s @ 16fps or ~10s @ 8fps
+      max_frames: 81        # ~5s @ 16fps
       fps: 16
-      resolution: [1280, 720]
-      compile: true         # torch.compile: ~20-30% speedup; image includes 3.10/3.11 dev headers
-      flash_attention: true  # FA2 via pipe.transformer.enable_flash_attn(); fallback to xformers
-      teacache: true         # Step-skipping cache: ~1.5-2x throughput, minimal quality loss
-      teacache_thresh: 0.1   # 0.1=high quality, 0.2=faster, 0.3=fastest
-      default_steps: 20      # Flow-matching: 20 steps ≈ 50 steps quality for Wan2
-      offload: false
-      notes: "Best quality. Primary model."
-
-    hunyuan:
-      enabled: true
-      priority: 2
-      hf_id: "tencent/HunyuanVideo"
-      vram_gb: 60
-      dtype: bfloat16
-      max_frames: 129       # ~5s @ 24fps
-      fps: 24
       resolution: [1280, 720]
       compile: true
       flash_attention: true
+      teacache: true
+      teacache_thresh: 0.1
+      default_steps: 20
       offload: false
-      notes: "Cinema quality. Use for hero scenes."
+      notes: "14B — best quality. Used in Balanced and Quality strategies."
+
+    wan2_1b:
+      enabled: true
+      priority: 2
+      hf_id: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+      vram_gb: 6
+      dtype: bfloat16
+      max_frames: 81
+      fps: 16
+      resolution: [1280, 720]
+      compile: true
+      flash_attention: true
+      teacache: true
+      teacache_thresh: 0.1
+      default_steps: 20
+      offload: false
+      notes: "1.3B — fast. Used in Fast strategy. ~50s/clip at 1280x720."
+
+    hunyuan:
+      enabled: true
+      priority: 3
+      hf_id: "hunyuanvideo-community/HunyuanVideo"
+      vram_gb: 35
+      dtype: bfloat16
+      quantization: "int8"
+      max_frames: 129
+      fps: 24
+      resolution: [1280, 720]
+      compile: false
+      flash_attention: true
+      offload: false
+      notes: "HunyuanVideo INT8 — hero scenes in Quality strategy."
 
     cogvideox:
       enabled: true
-      priority: 3
+      priority: 4
       hf_id: "THUDM/CogVideoX-5b"
       vram_gb: 24
       dtype: bfloat16
@@ -90,36 +108,87 @@ generation:
   preset: slow
   cpu_threads: 48
 
-# Quality presets — user selects one; resolution/steps/model are derived.
-# Each preset maps to per-model overrides applied at generation time.
+# ── Generation strategies ─────────────────────────────────────────
+# User picks one in the UI. Controls model selection, resolution, steps.
+#
+#   Fast     → WAN 1.3B at native 1280×720.    ~50s/clip.  12 clips ≈ 10 min.
+#   Balanced → WAN 14B  at 848×480 + upscale.  ~90s/clip.  12 clips ≈ 18 min.
+#   Quality  → WAN 14B  bulk + Hunyuan INT8 hero.  ~20-25 min total.
+#
+strategies:
+  fast:
+    label: "Fast — WAN 1.3B (good quality, ~10 min for 2 min video)"
+    description: "All scenes use WAN 1.3B at full 1280×720. Fastest option."
+    bulk_model: "wan2_1b"
+    hero_model: "wan2_1b"          # no separate hero model
+    hero_scene_ids: []             # auto-detect disabled
+    gen_resolution: [1280, 720]
+    output_resolution: [1280, 720]
+    upscale: false
+    steps: 20
+    clip_duration: 10
+
+  balanced:
+    label: "Balanced — WAN 14B lower-res + upscale (high quality, ~20 min)"
+    description: "WAN 14B generates at 848×480 with PAB+TeaCache, then Real-ESRGAN upscales to 1280×720."
+    bulk_model: "wan2_14b"
+    hero_model: "wan2_14b"
+    hero_scene_ids: []
+    gen_resolution: [848, 480]
+    output_resolution: [1280, 720]
+    upscale: true
+    upscale_method: "realesrgan"
+    steps: 15
+    clip_duration: 10
+
+  quality:
+    label: "Quality — WAN 14B + Hunyuan hero (best quality, ~25 min)"
+    description: "Bulk scenes use WAN 14B at 848×480 + upscale. First and last scenes use Hunyuan INT8 for cinema-grade quality."
+    bulk_model: "wan2_14b"
+    hero_model: "hunyuan"
+    hero_scene_ids: "auto"         # auto = first + last scene
+    gen_resolution: [848, 480]
+    output_resolution: [1280, 720]
+    upscale: true
+    upscale_method: "realesrgan"
+    steps: 15                      # bulk steps; hero uses model default (50)
+    hero_steps: 30                 # hunyuan INT8 with 30 steps ≈ saves 40% vs 50
+    clip_duration: 10
+
+# Quality presets — used when strategy is NOT set (legacy / CLI fallback).
 quality_presets:
   ultra:
     label: "Ultra (1280×720, max steps)"
-    wan2:    { resolution: [1280, 720], steps: 50 }
-    hunyuan: { resolution: [1280, 720], steps: 50 }
+    wan2_14b: { resolution: [1280, 720], steps: 50 }
+    wan2_1b:  { resolution: [1280, 720], steps: 50 }
+    hunyuan:  { resolution: [1280, 720], steps: 50 }
     cogvideox: { resolution: [720, 480], steps: 50 }
-    ltx:     { resolution: [768, 512], steps: 30 }
+    ltx:      { resolution: [768, 512], steps: 30 }
   high:
     label: "High (1280×720)"
-    wan2:    { resolution: [1280, 720], steps: 20 }
-    hunyuan: { resolution: [1280, 720], steps: 50 }
+    wan2_14b: { resolution: [1280, 720], steps: 20 }
+    wan2_1b:  { resolution: [1280, 720], steps: 20 }
+    hunyuan:  { resolution: [1280, 720], steps: 50 }
     cogvideox: { resolution: [720, 480], steps: 50 }
-    ltx:     { resolution: [768, 512], steps: 20 }
+    ltx:      { resolution: [768, 512], steps: 20 }
   balanced:
     label: "Balanced (848×480, faster)"
-    wan2:    { resolution: [848, 480], steps: 20 }
-    hunyuan: { resolution: [848, 480], steps: 30 }
+    wan2_14b: { resolution: [848, 480], steps: 20 }
+    wan2_1b:  { resolution: [848, 480], steps: 20 }
+    hunyuan:  { resolution: [848, 480], steps: 30 }
     cogvideox: { resolution: [720, 480], steps: 30 }
-    ltx:     { resolution: [768, 512], steps: 20 }
+    ltx:      { resolution: [768, 512], steps: 20 }
   fast:
     label: "Fast (848×480, fewer steps)"
-    wan2:    { resolution: [848, 480], steps: 15 }
-    hunyuan: { resolution: [848, 480], steps: 20 }
+    wan2_14b: { resolution: [848, 480], steps: 15 }
+    wan2_1b:  { resolution: [848, 480], steps: 15 }
+    hunyuan:  { resolution: [848, 480], steps: 20 }
     cogvideox: { resolution: [480, 320], steps: 25 }
-    ltx:     { resolution: [512, 320], steps: 15 }
+    ltx:      { resolution: [512, 320], steps: 15 }
   preview:
     label: "Preview (480×320, draft)"
-    wan2:    { resolution: [480, 320], steps: 10 }
-    hunyuan: { resolution: [480, 320], steps: 15 }
+    wan2_14b: { resolution: [480, 320], steps: 10 }
+    wan2_1b:  { resolution: [480, 320], steps: 10 }
+    hunyuan:  { resolution: [480, 320], steps: 15 }
     cogvideox: { resolution: [480, 320], steps: 20 }
-    ltx:     { resolution: [512, 320], steps: 10 }
+    ltx:      { resolution: [512, 320], steps: 10 }

@@ -22,9 +22,20 @@
           <label for="script">Script / Prompt</label>
           <textarea id="script" placeholder="Write your scene script here. One paragraph per scene works best." required></textarea>
 
+          <div class="row">
+            <div>
+              <label for="strategy">Generation Strategy</label>
+              <select id="strategy">
+                <option value="fast">⚡ Fast — WAN 1.3B (good quality, ~10 min for 2 min video)</option>
+                <option value="balanced" selected>⚖️ Balanced — WAN 14B lower-res + upscale (~20 min)</option>
+                <option value="quality">🎬 Quality — WAN 14B + Hunyuan hero scenes (~25 min)</option>
+              </select>
+            </div>
+          </div>
+
           <div class="row-3">
             <div>
-              <label for="quality">Quality</label>
+              <label for="quality">Quality Preset</label>
               <select id="quality">
                 <option value="ultra">Ultra (1280×720, max steps)</option>
                 <option value="high" selected>High (1280×720)</option>

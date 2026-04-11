@@ -12,24 +12,20 @@ import torch
 import yaml
 
 from scene_splitter import SceneData
-from .models import Wan2Runner, HunyuanRunner, CogVideoXRunner, LTXRunner
+from .models import Wan2Runner, HunyuanRunner, CogVideoXRunner, LTXRunner, _RUNNER_CLASSES
 
 logger = logging.getLogger(__name__)
 
 # VRAM budget thresholds (in GB free) required before loading
 _VRAM_THRESHOLDS = {
-    "wan2": 42,
-    "hunyuan": 62,
+    "wan2_14b": 42,
+    "wan2_1b": 8,
+    "hunyuan": 37,
     "cogvideox": 26,
     "ltx": 12,
 }
 
-_RUNNERS = {
-    "wan2": Wan2Runner,
-    "hunyuan": HunyuanRunner,
-    "cogvideox": CogVideoXRunner,
-    "ltx": LTXRunner,
-}
+_RUNNERS = _RUNNER_CLASSES
 
 
 def _free_vram_gb() -> float:
@@ -46,6 +42,7 @@ class LocalRunner:
 
         self.model_cfgs: dict = cfg["models"]["local"]
         self.quality_presets: dict = cfg.get("quality_presets", {})
+        self.strategies: dict = cfg.get("strategies", {})
         self._runners: dict[str, Wan2Runner | HunyuanRunner | CogVideoXRunner | LTXRunner] = {}
         self._active_model: str | None = None
 
@@ -71,25 +68,42 @@ class LocalRunner:
         preferred_model: str | None = None,
         quality: str = "high",    # ultra | high | balanced | fast | preview
         seed: int | None = None,
+        strategy: str | None = None,
+        is_hero: bool = False,
     ) -> Path:
         """Generate a single scene clip. Returns path to output MP4."""
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"scene_{scene.scene_id:04d}.mp4"
 
-        model_name = self._select_model(preferred_model, quality)
+        strat = self.strategies.get(strategy) if strategy else None
+
+        if strat and not preferred_model:
+            # Strategy drives model selection
+            model_name = strat["hero_model"] if is_hero else strat["bulk_model"]
+        else:
+            model_name = self._select_model(preferred_model, quality)
+
         self._switch_model(model_name)
         runner = self._runners[model_name]
         mcfg = self.model_cfgs[model_name]
 
-        # Apply quality preset overrides (resolution, steps)
-        preset = self.quality_presets.get(quality, {}).get(model_name, {})
-        width, height = preset.get("resolution", mcfg["resolution"])
-        steps = preset.get("steps", mcfg.get("default_steps", 20))
+        # Resolution & steps: strategy overrides > quality preset > model defaults
+        if strat:
+            if is_hero:
+                width, height = strat.get("gen_resolution", mcfg["resolution"])
+                steps = strat.get("hero_steps", mcfg.get("default_steps", 30))
+            else:
+                width, height = strat.get("gen_resolution", mcfg["resolution"])
+                steps = strat.get("steps", mcfg.get("default_steps", 20))
+        else:
+            preset = self.quality_presets.get(quality, {}).get(model_name, {})
+            width, height = preset.get("resolution", mcfg["resolution"])
+            steps = preset.get("steps", mcfg.get("default_steps", 20))
 
         logger.info(
             f"Scene {scene.scene_id} → {model_name} "
-            f"({width}x{height}, {steps} steps, quality={quality})"
+            f"({width}x{height}, {steps} steps, strategy={strategy or 'none'}, hero={is_hero})"
         )
         return runner.generate(
             prompt=scene.video_prompt or scene.text,
@@ -122,7 +136,7 @@ class LocalRunner:
                 preferred = "ltx"
             elif quality == "fast":
                 preferred = "cogvideox"
-            # ultra, high, balanced: use priority order (wan2 > hunyuan > ...)
+            # ultra, high, balanced: use priority order (wan2_14b > wan2_1b > ...)
 
         candidates = (
             [preferred] + self._priority_order
@@ -155,9 +169,20 @@ class LocalRunner:
         # Unload current model only if new model won't fit alongside it
         if self._active_model:
             req_new = _VRAM_THRESHOLDS.get(name, 20)
-            req_cur = _VRAM_THRESHOLDS.get(self._active_model, 20)
             if _free_vram_gb() < req_new:
                 logger.info(f"Unloading {self._active_model} to load {name}")
                 self._runners[self._active_model].unload()
                 self._active_model = None
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                time.sleep(0.5)
+                freed = _free_vram_gb()
+                logger.info(f"Post-unload free VRAM: {freed:.1f} GB")
+                if freed < _VRAM_THRESHOLDS.get(name, 20):
+                    logger.warning(
+                        f"VRAM still insufficient after unload: {freed:.1f} GB free, "
+                        f"{_VRAM_THRESHOLDS.get(name, 20)} GB needed for {name}"
+                    )
         self._active_model = name

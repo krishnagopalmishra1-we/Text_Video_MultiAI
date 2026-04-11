@@ -30,11 +30,13 @@ class VideoRouter:
         quality: QualityMode = "high",
         local_retries: int = 2,
         api_fallback: bool = True,
+        strategy: str | None = None,
     ):
         self.output_dir = Path(output_dir)
         self.quality = quality
         self.local_retries = local_retries
         self.api_fallback = api_fallback
+        self.strategy = strategy
         self.local = LocalRunner(config_path)
         self.api = APIRunner()
 
@@ -48,6 +50,7 @@ class VideoRouter:
         preferred_model: str | None = None,
         seed: int | None = None,
         hero: bool = False,
+        is_hero: bool = False,
     ) -> Path:
         """
         Generate one scene clip.
@@ -67,6 +70,8 @@ class VideoRouter:
                     preferred_model=preferred_model,
                     quality=self.quality,
                     seed=seed,
+                    strategy=self.strategy,
+                    is_hero=is_hero,
                 )
             except Exception as e:
                 logger.exception(f"Local attempt {attempt}/{self.local_retries} failed")
@@ -89,6 +94,7 @@ class VideoRouter:
         preferred_model: str | None = None,
         seed: int | None = None,
         hero: bool = False,
+        is_hero: bool = False,
     ) -> Path:
         loop = asyncio.get_event_loop()
 
@@ -106,6 +112,8 @@ class VideoRouter:
                         preferred_model=preferred_model,
                         quality=self.quality,
                         seed=seed,
+                        strategy=self.strategy,
+                        is_hero=is_hero,
                     ),
                 )
             except Exception as e:

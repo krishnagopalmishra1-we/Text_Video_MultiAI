@@ -33,13 +33,41 @@ class HunyuanRunner:
         except ImportError:
             raise ImportError("Install diffusers>=0.32.0")
 
-        logger.info("Loading HunyuanVideo (A100 optimized, bfloat16)…")
         model_id = self.cfg.get("hf_id", _MODEL_ID)
-        transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-            model_id,
-            subfolder="transformer",
-            torch_dtype=torch.bfloat16,
-        )
+        quant = self.cfg.get("quantization")  # "int8", "int4", or None
+
+        if quant == "int8":
+            logger.info(f"Loading HunyuanVideo INT8-quantized (A100 tensor-core accelerated)…")
+            from diffusers import BitsAndBytesConfig
+            quant_config = BitsAndBytesConfig(load_in_8bit=True)
+            transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+                model_id,
+                subfolder="transformer",
+                quantization_config=quant_config,
+                torch_dtype=torch.bfloat16,
+            )
+        elif quant == "int4":
+            logger.info(f"Loading HunyuanVideo NF4-quantized (~20GB VRAM)…")
+            from diffusers import BitsAndBytesConfig
+            quant_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+            transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+                model_id,
+                subfolder="transformer",
+                quantization_config=quant_config,
+                torch_dtype=torch.bfloat16,
+            )
+        else:
+            logger.info("Loading HunyuanVideo (bfloat16, no quantization)…")
+            transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+                model_id,
+                subfolder="transformer",
+                torch_dtype=torch.bfloat16,
+            )
+
         self.pipe = HunyuanVideoPipeline.from_pretrained(
             model_id,
             transformer=transformer,

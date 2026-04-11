@@ -70,16 +70,21 @@ def build_xfade_chain(
     xfade_name = _XFADE_NAME_MAP.get(transition_type, transition_type)
     td = transition_duration
     lines: list[str] = []
-    cumulative = 0.0
 
+    # The offset for the i-th xfade is the total duration of the output
+    # stream up to that point.  After each xfade the stream's duration
+    # shrinks by `td` compared to a simple concatenation.
+    #   offset_0 = dur[0] - td
+    #   offset_k = offset_{k-1} + dur[k] - td   (for k >= 1)
+    offset = 0.0
     for i in range(n - 1):
-        cumulative += clip_durations[i] - td
+        offset = (offset + clip_durations[i] - td) if i > 0 else (clip_durations[0] - td)
         in_a = f"[v{i}]" if i > 0 else f"[{i}:v]"
         in_b = f"[{i + 1}:v]"
         out = f"[v{i + 1}]" if i < n - 2 else "[outv]"
         lines.append(
             f"{in_a}{in_b}xfade=transition={xfade_name}:"
-            f"duration={td}:offset={cumulative:.3f}{out}"
+            f"duration={td}:offset={offset:.3f}{out}"
         )
 
     return "; ".join(lines)

@@ -60,7 +60,7 @@ def _warmup_gpu_worker(**kwargs):
         import yaml
         with open("config/model_config.yaml") as f:
             cfg = yaml.safe_load(f)
-        wan_cfg = cfg.get("models", {}).get("local", {}).get("wan2", {})
+        wan_cfg = cfg.get("models", {}).get("local", {}).get("wan2_14b", {})
         if not wan_cfg.get("enabled"):
             return
         from video_engine.models.wan2 import Wan2Runner
@@ -69,6 +69,23 @@ def _warmup_gpu_worker(**kwargs):
         logger.info("GPU worker warmup complete.")
     except Exception as e:
         logger.warning(f"GPU worker warmup failed (non-fatal): {e}")
+
+
+# ------------------------------------------------------------------
+# VideoRouter singleton — reuse across generate_scene_clip calls
+# to avoid reloading models from scratch per scene (B16 fix).
+# ------------------------------------------------------------------
+_video_router = None
+_video_router_quality = None
+
+
+def _get_video_router(quality: str = "high"):
+    global _video_router, _video_router_quality
+    if _video_router is None or _video_router_quality != quality:
+        from video_engine import VideoRouter
+        _video_router = VideoRouter(quality=quality)
+        _video_router_quality = quality
+    return _video_router
 
 
 @celery_app.task(
@@ -95,11 +112,10 @@ def generate_prompts(self, job_id: str, scenes_json: list[dict], style: str) -> 
 )
 def generate_scene_clip(self, job_id: str, scene_dict: dict, quality: str) -> dict:
     from scene_splitter import SceneData
-    from video_engine import VideoRouter
     from db.models import Scene, engine as db_engine
 
     scene = SceneData(**scene_dict)
-    router = VideoRouter(quality=quality)
+    router = _get_video_router(quality=quality)
 
     with Session(db_engine) as session:
         db_scene = session.exec(
@@ -274,14 +290,29 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
         scenes = asyncio.run(engine.generate_batch(scenes))
 
         # 3. Generate video clips (sequential — single A100)
+        strategy = cfg.get("strategy", "balanced")
         router = VideoRouter(
             quality=cfg.get("quality", "high"),
             output_dir=str(out_dir / "scenes"),
             api_fallback=cfg.get("api_fallback", True),
+            strategy=strategy,
         )
         clip_paths = []
         resume = cfg.get("resume", True)
         preferred_model = cfg.get("preferred_model")
+
+        # Determine hero scenes from strategy config
+        import yaml as _yaml
+        with open("config/model_config.yaml") as _f:
+            _strat_cfg = _yaml.safe_load(_f).get("strategies", {}).get(strategy, {})
+        _hero_ids_cfg = _strat_cfg.get("hero_scene_ids", [])
+        if _hero_ids_cfg == "auto":
+            # auto = first and last scene
+            hero_scene_ids = {scenes[0].scene_id, scenes[-1].scene_id} if scenes else set()
+        elif _hero_ids_cfg:
+            hero_scene_ids = set(_hero_ids_cfg)
+        else:
+            hero_scene_ids = set()
 
         for scene in scenes:
             out_path = out_dir / "scenes" / f"scene_{scene.scene_id:04d}.mp4"
@@ -328,6 +359,7 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
                     scene,
                     preferred_model=preferred_model,
                     seed=scene.scene_id,
+                    is_hero=scene.scene_id in hero_scene_ids,
                 )
             except Exception as e:
                 with Session(db_engine) as session:

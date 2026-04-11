@@ -64,16 +64,25 @@ class TTSEngine:
 
         for scene in scenes:
             text = scene.narration or ""
-            if text:
-                tmp = out.parent / f"_tmp_{scene.scene_id}.wav"
-                self.synthesize(text, tmp)
-                audio, sr = sf.read(str(tmp))
-                if sr != self.sample_rate:
-                    import librosa
-                    audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
-                tmp.unlink(missing_ok=True)
-            else:
-                audio = np.zeros(0)
+            tmp = out.parent / f"_tmp_{scene.scene_id}.wav"
+            try:
+                if text:
+                    self.synthesize(text, tmp)
+                    audio, sr = sf.read(str(tmp))
+                    if sr != self.sample_rate:
+                        # Resample without librosa — use scipy.signal if available,
+                        # otherwise simple numpy interpolation
+                        target_len = int(len(audio) * self.sample_rate / sr)
+                        audio = np.interp(
+                            np.linspace(0, len(audio) - 1, target_len),
+                            np.arange(len(audio)),
+                            audio,
+                        )
+                else:
+                    audio = np.zeros(0)
+            finally:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
 
             target = int(scene.duration * self.sample_rate)
             if len(audio) < target:

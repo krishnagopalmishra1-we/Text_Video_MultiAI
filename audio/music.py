@@ -82,7 +82,9 @@ class MusicEngine:
             ).to(self.device)
 
             if seed is not None:
-                torch.manual_seed(seed)
+                gen = torch.Generator(device=self.device).manual_seed(seed)
+            else:
+                gen = None
 
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
                 audio_values = self._model.generate(

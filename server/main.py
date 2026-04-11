@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -26,23 +27,26 @@ from server.tasks import run_pipeline, generate_scene_clip
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="Long Video Generator",
-    version="1.0.0",
-    description="Multi-model AI long-form video generation system",
-)
 
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/app", StaticFiles(directory=str(STATIC_DIR)), name="app")
-
-
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    yield
+
+
+app = FastAPI(
+    title="Long Video Generator",
+    version="1.0.0",
+    description="Multi-model AI long-form video generation system",
+    lifespan=lifespan,
+)
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/app", StaticFiles(directory=str(STATIC_DIR)), name="app")
 
 
 # ------------------------------------------------------------------
@@ -51,9 +55,10 @@ def on_startup():
 
 class VideoJobRequest(BaseModel):
     script: str = Field(..., min_length=10)
+    strategy: str = Field(default="balanced")      # fast | balanced | quality
     style: str = Field(default="cinematic")
     quality: str = Field(default="high")           # ultra | high | balanced | fast | preview
-    preferred_model: Optional[str] = Field(default=None)  # wan2 | hunyuan | cogvideox | ltx
+    preferred_model: Optional[str] = Field(default=None)  # wan2_14b | wan2_1b | hunyuan | cogvideox | ltx
     api_fallback: bool = Field(default=True)        # Runway fallback only after local failures
     pacing: str = Field(default="normal")          # slow | normal | fast
     transition: str = Field(default="crossfade")
@@ -90,7 +95,53 @@ class JobStatusResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    import shutil
+    checks = {}
+
+    # Redis
+    try:
+        from server.tasks import celery_app
+        celery_app.connection().ensure_connection(max_retries=1, timeout=2)
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "error"
+
+    # GPU
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            checks["gpu"] = {
+                "free_gb": round(free / 1e9, 1),
+                "total_gb": round(total / 1e9, 1),
+            }
+        else:
+            checks["gpu"] = "unavailable"
+    except Exception:
+        checks["gpu"] = "error"
+
+    # Disk
+    try:
+        usage = shutil.disk_usage("outputs")
+        checks["disk"] = {"free_gb": round(usage.free / 1e9, 1)}
+    except Exception:
+        checks["disk"] = "error"
+
+    # DB
+    try:
+        from db.models import engine as db_engine
+        with Session(db_engine) as s:
+            s.exec(select(Job).limit(1))
+        checks["db"] = "ok"
+    except Exception:
+        checks["db"] = "error"
+
+    all_ok = all(
+        v == "ok" or isinstance(v, dict)
+        for v in checks.values()
+    )
+    status_code = "ok" if all_ok else "degraded"
+    return {"status": status_code, "checks": checks}
 
 
 @app.get("/", response_class=HTMLResponse)

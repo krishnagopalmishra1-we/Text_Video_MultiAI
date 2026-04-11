@@ -47,7 +47,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-audio", action="store_true")
     p.add_argument("--tts-backend", default="kokoro", choices=["kokoro", "elevenlabs"])
     p.add_argument("--preferred-model", default=None,
-                   choices=["wan2", "hunyuan", "cogvideox", "ltx"])
+                   choices=["wan2_14b", "wan2_1b", "hunyuan", "cogvideox", "ltx"])
+    p.add_argument("--strategy", default="balanced",
+                   choices=["fast", "balanced", "quality"],
+                   help="Generation strategy: fast (1.3B), balanced (14B+upscale), quality (14B+Hunyuan hero)")
     p.add_argument("--job-id", default=None, help="Unique job ID for output organization")
     return p.parse_args()
 
@@ -103,14 +106,23 @@ def main() -> None:
         output_dir=str(out_dir / "scenes"),
         quality=args.quality,
         api_fallback=True,
+        strategy=args.strategy,
     )
+
+    # Determine hero scene IDs for quality strategy
+    hero_scene_ids: set[str] = set()
+    if args.strategy == "quality" and len(scenes) >= 2:
+        hero_scene_ids = {scenes[0].scene_id, scenes[-1].scene_id}
+
     clip_paths = []
     for i, scene in enumerate(scenes, 1):
         t = time.time()
-        logger.info(f"  Scene {i}/{len(scenes)} (id={scene.scene_id}, {scene.duration:.1f}s)…")
+        is_hero = scene.scene_id in hero_scene_ids
+        logger.info(f"  Scene {i}/{len(scenes)} (id={scene.scene_id}, {scene.duration:.1f}s, hero={is_hero})…")
         path = router.generate_scene(
             scene,
             preferred_model=args.preferred_model,
+            is_hero=is_hero,
         )
         clip_paths.append(path)
         logger.info(f"    ✓ {path.name} [{time.time()-t:.1f}s]")
@@ -123,7 +135,7 @@ def main() -> None:
         from audio import TTSEngine, MusicEngine, AudioSync
         total_dur = sum(s.duration for s in scenes)
 
-        tts = TTSEngine(backend=args.tts_backend)
+        tts = TTSEngine()
         narration = tts.synthesize_full(scenes, out_dir / "audio" / "narration.wav")
         logger.info("  → Narration done.")
 

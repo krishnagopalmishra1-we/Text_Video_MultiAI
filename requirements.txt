@@ -20,43 +20,33 @@ diffusers>=0.33.0          # 0.33.0+ required for TeaCache hooks
 transformers>=4.45.0
 accelerate>=0.34.0
 huggingface_hub>=0.25.0
-sentencepiece>=0.2.0
-tokenizers>=0.20.0
-tiktoken>=0.7.0
-protobuf>=4.25.0
 safetensors>=0.4.4
 
 # ── Flash Attention (A100 native) ────────────────────────────────
 # Install separately: pip install flash-attn --no-build-isolation
-xformers>=0.0.28
+
+# ── SageAttention (1.5-1.7× faster than FA2, drop-in) ───────────
+# Install separately on GPU nodes: pip install sageattention
+# sageattention>=1.0.0
+
+# ── Quantization (INT8/NF4 for Hunyuan on A100) ─────────────────
+bitsandbytes>=0.43.0
 
 # ── Multi-GPU sequence parallelism (xDiT) ────────────────────────
-# Enables 2-8x A100 parallel inference via DiT sequence parallelism
 # Install separately on multi-GPU nodes: pip install xdit
-# xdit>=0.4.0  # uncomment when scaling to multi-GPU
+# xdit>=0.4.0
 
 # ── Audio ────────────────────────────────────────────────────────
 kokoro>=0.9.4
 soundfile>=0.12.1
-librosa>=0.10.2
 numpy>=1.26.0
-scipy>=1.13.0
-# elevenlabs — removed, Kokoro handles TTS locally for free
 
 # ── LLM / Prompts ────────────────────────────────────────────────
 anthropic>=0.34.0
 
-# ── NLP (scene splitting) ────────────────────────────────────────
-nltk>=3.9.0
-
 # ── Config ───────────────────────────────────────────────────────
 pyyaml>=6.0.2
 python-dotenv>=1.0.1
-
-# ── Utilities ────────────────────────────────────────────────────
-tqdm>=4.66.0
-rich>=13.8.0
-psutil>=6.0.0
 
 # ── Video export (required by diffusers export_to_video) ─────────
 imageio>=2.34.0

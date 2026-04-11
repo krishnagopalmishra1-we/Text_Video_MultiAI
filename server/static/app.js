@@ -96,6 +96,7 @@ form.addEventListener("submit", async (e) => {
 
   const payload = {
     script,
+    strategy: document.getElementById("strategy").value,
     style: document.getElementById("style").value,
     quality: document.getElementById("quality").value,
     preferred_model: document.getElementById("preferred_model").value,

@@ -144,7 +144,6 @@ class SceneSplitter:
 
     def _merge_chunks(self, paragraphs: list[str]) -> list[str]:
         """Merge short paragraphs until they approach target word count."""
-        target_words = int(self.target_duration * self.wps)
         chunks: list[str] = []
         current: list[str] = []
         current_wc = 0
@@ -180,7 +179,6 @@ class SceneSplitter:
         chunks: list[str] = []
         current: list[str] = []
         current_wc = 0
-        target_words = int(self.target_duration * self.wps)
 
         for sent in sentences:
             wc = len(sent.split())

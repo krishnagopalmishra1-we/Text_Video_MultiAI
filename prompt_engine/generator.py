@@ -68,8 +68,12 @@ class PromptEngine:
             try:
                 raw = await self._llm_prompt(scene.text, style, camera, scene.duration)
                 return build_prompt(raw, style, camera, self.presets)
-            except Exception:
-                pass  # fall through to template
+            except Exception as e:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "LLM prompt generation failed for scene %s: %s", scene.scene_id, e
+                )
+                # fall through to template
 
         return build_prompt(scene.narration or scene.text, style, camera, self.presets)
 

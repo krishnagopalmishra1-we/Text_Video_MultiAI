@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 
 class APIRunner:
+    def __init__(self):
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from api.runway import RunwayClient
+            self._client = RunwayClient()
+        return self._client
+
     async def generate(
         self,
         scene: SceneData,
@@ -21,8 +30,7 @@ class APIRunner:
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        from api.runway import RunwayClient
-        client = RunwayClient()
+        client = self._get_client()
         out_path = out_dir / f"scene_{scene.scene_id:04d}.mp4"
         logger.info(f"Scene {scene.scene_id} → Runway Gen-3")
         return await client.generate(
