@@ -132,3 +132,14 @@ outputs/
 ## Cleanup Notes (2026-04-11)
 - Temporary smoke/debug shell scripts and ad-hoc smoke runner files created during troubleshooting were removed from the project root.
 - Only reusable model/runtime code changes and this operational note were retained.
+
+## Postmortem Guardrails (2026-04-12)
+- Always verify runtime container state before rerunning tests:
+  - `docker exec text_video_multiai_worker_gpu_1 grep compile /app/config/model_config.yaml`
+  - `docker exec text_video_multiai_worker_gpu_1 grep task_acks /app/server/tasks.py`
+  - `docker exec text_video_multiai_redis_1 redis-cli hlen unacked`
+- If code changed in worker images, do not rely on `docker-compose restart`; rebuild and recreate worker containers.
+- Mount `./config:/app/config:ro` on both GPU and CPU workers so model/runtime config changes apply immediately.
+- After crash loops, flush stale broker state before retesting (`redis-cli FLUSHDB`) to remove orphaned `unacked` tasks.
+- For this stack/PyTorch build, keep `compile: false` for WAN/Cog/Hunyuan unless compatibility is revalidated.
+- Before running long smoke batches, run one complete end-to-end canary (split → prompt → video → audio → stitch → done).
