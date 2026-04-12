@@ -223,6 +223,8 @@ def stitch_video(
     bind=True,
     max_retries=1,
     queue="gpu",
+    soft_time_limit=3600,   # 60 min soft limit (raises SoftTimeLimitExceeded)
+    time_limit=3900,        # 65 min hard kill
 )
 def run_pipeline(self, job_id: str, config: dict) -> str:
     """
@@ -302,21 +304,94 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
         else:
             hero_scene_ids = set()
 
-        for scene in scenes:
-            out_path = out_dir / "scenes" / f"scene_{scene.scene_id:04d}.mp4"
+        try:
+            for scene in scenes:
+                out_path = out_dir / "scenes" / f"scene_{scene.scene_id:04d}.mp4"
 
-            with Session(db_engine) as session:
-                db_scene = session.exec(
-                    select(Scene).where(
-                        Scene.job_id == job_id,
-                        Scene.scene_id == scene.scene_id,
+                with Session(db_engine) as session:
+                    db_scene = session.exec(
+                        select(Scene).where(
+                            Scene.job_id == job_id,
+                            Scene.scene_id == scene.scene_id,
+                        )
+                    ).first()
+
+                    if resume and out_path.exists():
+                        if db_scene:
+                            db_scene.status = "done"
+                            db_scene.clip_path = str(out_path)
+                            db_scene.updated_at = datetime.utcnow()
+                            session.add(db_scene)
+
+                        job = session.get(Job, job_id)
+                        if job:
+                            done_scenes = session.exec(
+                                select(Scene).where(
+                                    Scene.job_id == job_id,
+                                    Scene.status == "done",
+                                )
+                            ).all()
+                            job.completed_scenes = len(done_scenes)
+                            job.updated_at = datetime.utcnow()
+                            session.add(job)
+                        session.commit()
+
+                        clip_paths.append(out_path)
+                        continue
+
+                    if db_scene:
+                        db_scene.status = "running"
+                        db_scene.updated_at = datetime.utcnow()
+                        session.add(db_scene)
+                        session.commit()
+
+                try:
+                    clip_path = router.generate_scene(
+                        scene,
+                        preferred_model=preferred_model,
+                        seed=scene.scene_id,
+                        is_hero=scene.scene_id in hero_scene_ids,
                     )
-                ).first()
+                except Exception as e:
+                    with Session(db_engine) as session:
+                        db_scene = session.exec(
+                            select(Scene).where(
+                                Scene.job_id == job_id,
+                                Scene.scene_id == scene.scene_id,
+                            )
+                        ).first()
+                        if db_scene:
+                            db_scene.status = "failed"
+                            db_scene.error = str(e)[:500]
+                            db_scene.updated_at = datetime.utcnow()
+                            session.add(db_scene)
+                            session.commit()
+                    raise
 
-                if resume and out_path.exists():
+                # Quality check — detect black/static/garbage clips
+                from pipeline.quality_check import check_clip_quality
+                qc = check_clip_quality(clip_path)
+                if not qc.get("passed", True) and not qc.get("skipped", False):
+                    logger.warning(
+                        f"Scene {scene.scene_id} QC FAILED: {qc} — regenerating"
+                    )
+                    clip_path = router.generate_scene(
+                        scene,
+                        preferred_model=preferred_model,
+                        seed=(scene.scene_id + 1000),
+                        is_hero=scene.scene_id in hero_scene_ids,
+                    )
+
+                with Session(db_engine) as session:
+                    db_scene = session.exec(
+                        select(Scene).where(
+                            Scene.job_id == job_id,
+                            Scene.scene_id == scene.scene_id,
+                        )
+                    ).first()
                     if db_scene:
                         db_scene.status = "done"
-                        db_scene.clip_path = str(out_path)
+                        db_scene.clip_path = str(clip_path)
                         db_scene.updated_at = datetime.utcnow()
                         session.add(db_scene)
 
@@ -331,70 +406,23 @@ def run_pipeline(self, job_id: str, config: dict) -> str:
                         job.completed_scenes = len(done_scenes)
                         job.updated_at = datetime.utcnow()
                         session.add(job)
+
                     session.commit()
 
-                    clip_paths.append(out_path)
-                    continue
-
-                if db_scene:
-                    db_scene.status = "running"
-                    db_scene.updated_at = datetime.utcnow()
-                    session.add(db_scene)
-                    session.commit()
-
+                clip_paths.append(clip_path)
+        finally:
+            # Always cleanup GPU VRAM — prevents progressive leaks across jobs
             try:
-                clip_path = router.generate_scene(
-                    scene,
-                    preferred_model=preferred_model,
-                    seed=scene.scene_id,
-                    is_hero=scene.scene_id in hero_scene_ids,
-                )
-            except Exception as e:
-                with Session(db_engine) as session:
-                    db_scene = session.exec(
-                        select(Scene).where(
-                            Scene.job_id == job_id,
-                            Scene.scene_id == scene.scene_id,
-                        )
-                    ).first()
-                    if db_scene:
-                        db_scene.status = "failed"
-                        db_scene.error = str(e)[:500]
-                        db_scene.updated_at = datetime.utcnow()
-                        session.add(db_scene)
-                        session.commit()
-                raise
-
-            with Session(db_engine) as session:
-                db_scene = session.exec(
-                    select(Scene).where(
-                        Scene.job_id == job_id,
-                        Scene.scene_id == scene.scene_id,
-                    )
-                ).first()
-                if db_scene:
-                    db_scene.status = "done"
-                    db_scene.clip_path = str(clip_path)
-                    db_scene.updated_at = datetime.utcnow()
-                    session.add(db_scene)
-
-                job = session.get(Job, job_id)
-                if job:
-                    done_scenes = session.exec(
-                        select(Scene).where(
-                            Scene.job_id == job_id,
-                            Scene.status == "done",
-                        )
-                    ).all()
-                    job.completed_scenes = len(done_scenes)
-                    job.updated_at = datetime.utcnow()
-                    session.add(job)
-
-                session.commit()
-
-            clip_paths.append(clip_path)
-
-        router.cleanup()
+                router.cleanup()
+            except Exception:
+                logger.warning("router.cleanup() failed during finally block")
+            import gc
+            gc.collect()
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
         # 4. Audio
         tts = TTSEngine()

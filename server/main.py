@@ -130,17 +130,15 @@ def health():
     except Exception:
         checks["redis"] = "error"
 
-    # GPU
+    # GPU — check via Celery worker ping (API container has no CUDA)
     try:
-        import torch
-        if torch.cuda.is_available():
-            free, total = torch.cuda.mem_get_info()
-            checks["gpu"] = {
-                "free_gb": round(free / 1e9, 1),
-                "total_gb": round(total / 1e9, 1),
-            }
+        from server.tasks import celery_app
+        gpu_inspect = celery_app.control.inspect(timeout=2)
+        gpu_ping = gpu_inspect.ping()
+        if gpu_ping:
+            checks["gpu"] = "ok"
         else:
-            checks["gpu"] = "unavailable"
+            checks["gpu"] = "no_workers"
     except Exception:
         checks["gpu"] = "error"
 

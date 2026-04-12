@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git wget curl \
     libsndfile1 libsndfile1-dev \
     libgl1 libglib2.0-0 \
+    espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
