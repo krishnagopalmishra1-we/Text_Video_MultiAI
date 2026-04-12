@@ -24,6 +24,9 @@ COPY stitcher/ ./stitcher/
 COPY pipeline/ ./pipeline/
 COPY config/ ./config/
 COPY db/ ./db/
+COPY scene_splitter/ ./scene_splitter/
+COPY prompt_engine/ ./prompt_engine/
+COPY video_engine/ ./video_engine/
 
 # Create output dirs
 RUN mkdir -p /app/outputs/{audio,final,scenes,upscaled}
