@@ -51,33 +51,12 @@ celery_app.conf.update(
 )
 
 
-# Pre-load and warmup the primary model on GPU worker startup
-# so torch.compile overhead is paid once, not on every job.
-@worker_process_init.connect
-def _warmup_gpu_worker(**kwargs):
-    import os
-    queue = os.environ.get("CELERY_QUEUES", "")
-    # Only warmup on GPU workers
-    if "cpu" in queue:
-        return
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return
-        import yaml
-        with open("config/model_config.yaml") as f:
-            cfg = yaml.safe_load(f)
-        wan_cfg = cfg.get("models", {}).get("local", {}).get("wan2_14b", {})
-        if not wan_cfg.get("enabled"):
-            return
-        from video_engine.models.wan2 import Wan2Runner
-        runner = Wan2Runner(wan_cfg)
-        # Load model only (no warmup inference — torch.compile warmup
-        # can crash the inductor subprocess pool on some envs).
-        runner.load()
-        logger.info("GPU worker model pre-loaded (skipping compile warmup).")
-    except Exception as e:
-        logger.warning(f"GPU worker pre-load failed (non-fatal): {e}")
+# Warmup disabled — standalone runner was never reused by VideoRouter,
+# causing double model loading and VRAM/crash issues.
+# The first task will cold-load the requested model instead.
+# @worker_process_init.connect
+# def _warmup_gpu_worker(**kwargs):
+#     ...
 
 
 # ------------------------------------------------------------------
