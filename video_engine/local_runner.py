@@ -12,7 +12,7 @@ import torch
 import yaml
 
 from scene_splitter import SceneData
-from .models import Wan2Runner, HunyuanRunner, CogVideoXRunner, _RUNNER_CLASSES
+from .models import Wan2Runner, HunyuanRunner, _RUNNER_CLASSES
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ _VRAM_THRESHOLDS = {
     "wan2_14b": 42,
     "wan2_1b": 8,
     "hunyuan": 37,
-    "cogvideox": 26,
 }
 
 _RUNNERS = _RUNNER_CLASSES
@@ -42,7 +41,7 @@ class LocalRunner:
         self.model_cfgs: dict = cfg["models"]["local"]
         self.quality_presets: dict = cfg.get("quality_presets", {})
         self.strategies: dict = cfg.get("strategies", {})
-        self._runners: dict[str, Wan2Runner | HunyuanRunner | CogVideoXRunner] = {}
+        self._runners: dict[str, Wan2Runner | HunyuanRunner] = {}
         self._active_model: str | None = None
 
         # Build runner instances for enabled models
@@ -129,12 +128,6 @@ class LocalRunner:
         free = _free_vram_gb()
         logger.debug(f"Free VRAM: {free:.1f} GB")
 
-        # Quality → preferred model hint (only if user didn't specify)
-        if preferred is None:
-            if quality in ("preview", "fast"):
-                preferred = "cogvideox"
-            # ultra, high, balanced: use priority order (wan2_14b > wan2_1b > ...)
-
         candidates = (
             [preferred] + self._priority_order
             if preferred and preferred in self._runners
@@ -146,13 +139,13 @@ class LocalRunner:
             if free >= required:
                 return name
 
-        # Force-unload active model and retry cogvideox (smallest remaining)
+        # Force-unload active model and retry with smallest available (wan2_1b)
         if self._active_model:
             self._runners[self._active_model].unload()
             self._active_model = None
             time.sleep(1)
-            if "cogvideox" in self._runners:
-                return "cogvideox"
+            if "wan2_1b" in self._runners and free >= _VRAM_THRESHOLDS["wan2_1b"]:
+                return "wan2_1b"
 
         raise RuntimeError(
             f"No local model fits in available VRAM ({free:.1f} GB free). "

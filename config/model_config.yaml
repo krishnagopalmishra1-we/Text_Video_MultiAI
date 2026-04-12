@@ -53,20 +53,6 @@ models:
       offload: false
       notes: "HunyuanVideo INT8 — hero scenes in Quality strategy."
 
-    cogvideox:
-      enabled: true
-      priority: 4
-      hf_id: "THUDM/CogVideoX-5b"
-      vram_gb: 24
-      dtype: bfloat16
-      max_frames: 49        # ~6s @ 8fps
-      fps: 8
-      resolution: [720, 480]
-      compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
-      flash_attention: true
-      offload: false
-      notes: "Fast. Use for bulk scenes."
-
   api:
     runway:
       enabled: true
@@ -148,28 +134,23 @@ quality_presets:
     wan2_14b: { resolution: [1280, 720], steps: 50 }
     wan2_1b:  { resolution: [1280, 720], steps: 50 }
     hunyuan:  { resolution: [1280, 720], steps: 50 }
-    cogvideox: { resolution: [720, 480], steps: 50 }
   high:
     label: "High (1280×720)"
     wan2_14b: { resolution: [1280, 720], steps: 20 }
     wan2_1b:  { resolution: [1280, 720], steps: 20 }
     hunyuan:  { resolution: [1280, 720], steps: 50 }
-    cogvideox: { resolution: [720, 480], steps: 50 }
   balanced:
     label: "Balanced (848×480, faster)"
     wan2_14b: { resolution: [848, 480], steps: 20 }
     wan2_1b:  { resolution: [848, 480], steps: 20 }
     hunyuan:  { resolution: [848, 480], steps: 30 }
-    cogvideox: { resolution: [720, 480], steps: 30 }
   fast:
     label: "Fast (848×480, fewer steps)"
     wan2_14b: { resolution: [848, 480], steps: 15 }
     wan2_1b:  { resolution: [848, 480], steps: 15 }
     hunyuan:  { resolution: [848, 480], steps: 20 }
-    cogvideox: { resolution: [480, 320], steps: 25 }
   preview:
     label: "Preview (480×320, draft)"
     wan2_14b: { resolution: [480, 320], steps: 10 }
     wan2_1b:  { resolution: [480, 320], steps: 10 }
     hunyuan:  { resolution: [480, 320], steps: 15 }
-    cogvideox: { resolution: [480, 320], steps: 20 }

@@ -30,9 +30,6 @@ RUNS = [
     ("HUNYUAN_FAST",     "hunyuan",    "fast"),
     ("HUNYUAN_BALANCED", "hunyuan",    "balanced"),
     ("HUNYUAN_QUALITY",  "hunyuan",    "quality"),
-    ("COGVID_FAST",      "cogvideox",  "fast"),
-    ("COGVID_BALANCED",  "cogvideox",  "balanced"),
-    ("COGVID_QUALITY",   "cogvideox",  "quality"),
 ]
 
 client = httpx.Client(base_url=API, timeout=30.0)
