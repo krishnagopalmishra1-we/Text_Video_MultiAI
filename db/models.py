@@ -9,9 +9,30 @@ from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlalchemy.pool import QueuePool, NullPool
 
 _DB_URL = os.environ.get("DATABASE_URL", "sqlite:///./outputs/jobs.db")
-engine = create_engine(_DB_URL, echo=False, connect_args={"check_same_thread": False})
+
+# Use different pool strategies based on database
+if _DB_URL.startswith("postgresql"):
+    # PostgreSQL: use QueuePool for concurrent access
+    engine = create_engine(
+        _DB_URL,
+        echo=False,
+        poolclass=QueuePool,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,  # Verify connections before use
+        pool_recycle=3600,    # Recycle connections every hour
+    )
+else:
+    # SQLite: use NullPool (no connection pooling)
+    engine = create_engine(
+        _DB_URL,
+        echo=False,
+        poolclass=NullPool,
+        connect_args={"check_same_thread": False}
+    )
 
 
 def init_db() -> None:

@@ -1,0 +1,31 @@
+# CPU worker for audio generation, TTS, and stitching
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install FFmpeg and audio libs only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 libsndfile1-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements
+COPY requirements-cpu.txt .
+RUN pip install --no-cache-dir -r requirements-cpu.txt
+
+# Copy code
+COPY server/ ./server/
+COPY audio/ ./audio/
+COPY stitcher/ ./stitcher/
+COPY pipeline/ ./pipeline/
+COPY config/ ./config/
+COPY db/ ./db/
+
+# Create output dirs
+RUN mkdir -p /app/outputs/{audio,final,scenes,upscaled}
+
+CMD ["celery", "-A", "server.tasks", "worker", "-l", "info", "-Q", "cpu", "-c", "8"]

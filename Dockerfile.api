@@ -1,0 +1,28 @@
+# Lightweight FastAPI server (no CUDA dependencies)
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install only essential system deps (no CUDA, no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy minimal requirements
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+# Copy only necessary code
+COPY server/ ./server/
+COPY db/ ./db/
+COPY config/ ./config/
+
+# Create output dirs
+RUN mkdir -p /app/outputs/{audio,final,scenes,upscaled}
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
