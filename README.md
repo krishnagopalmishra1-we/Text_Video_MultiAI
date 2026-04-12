@@ -3,7 +3,7 @@
 AI-powered long-form video generation (1–2 min target in ~27 min) on a single A100 80GB.
 
 ## Stack
-- **Video models**: Wan2.1-14B (primary) · Wan2.1-1.3B (fast) · HunyuanVideo INT8 (hero scenes) · CogVideoX-5B · LTX-Video · Runway (API fallback)
+- **Video models**: Wan2.1-14B (primary) · Wan2.1-1.3B (fast) · HunyuanVideo INT8 (hero scenes) · CogVideoX-5B · Runway (API fallback)
 - **Acceleration**: SageAttention · PAB · TeaCache · FBCache · torch.compile
 - **TTS**: Kokoro (local, 82M params)
 - **Music**: MusicGen-large (local)
@@ -101,7 +101,6 @@ SCRIPT
   ↓   Wan2.1-1.3B    — fast (8GB VRAM, 1280×720 native)
   ↓   HunyuanVideo   — hero scenes (37GB VRAM INT8, quality strategy)
   ↓   CogVideoX-5B   — fallback (24GB VRAM)
-  ↓   LTX-Video      — fastest (10GB VRAM, preview)
   ↓   Runway Gen-3   — API fallback
   ↓ Upscaler         — Real-ESRGAN 848×480 → 1280×720
   ↓ Stitcher         — FFmpeg concat + xfade transitions
@@ -152,6 +151,5 @@ outputs/{job_id}/
 | Wan2.1-1.3B | ~8GB | ~20s | ★★★ | SageAttn + TeaCache + compile |
 | HunyuanVideo INT8 | ~37GB | ~3 min | ★★★★★ | bitsandbytes INT8 quantization |
 | CogVideoX-5B | ~24GB | ~1.5 min | ★★★★ | standard |
-| LTX-Video | ~10GB | ~15s | ★★★ | standard |
 
 12-clip balanced video ≈ 20 min end-to-end (including TTS, music, stitching).

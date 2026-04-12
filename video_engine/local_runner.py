@@ -12,7 +12,7 @@ import torch
 import yaml
 
 from scene_splitter import SceneData
-from .models import Wan2Runner, HunyuanRunner, CogVideoXRunner, LTXRunner, _RUNNER_CLASSES
+from .models import Wan2Runner, HunyuanRunner, CogVideoXRunner, _RUNNER_CLASSES
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,6 @@ _VRAM_THRESHOLDS = {
     "wan2_1b": 8,
     "hunyuan": 37,
     "cogvideox": 26,
-    "ltx": 12,
 }
 
 _RUNNERS = _RUNNER_CLASSES
@@ -43,7 +42,7 @@ class LocalRunner:
         self.model_cfgs: dict = cfg["models"]["local"]
         self.quality_presets: dict = cfg.get("quality_presets", {})
         self.strategies: dict = cfg.get("strategies", {})
-        self._runners: dict[str, Wan2Runner | HunyuanRunner | CogVideoXRunner | LTXRunner] = {}
+        self._runners: dict[str, Wan2Runner | HunyuanRunner | CogVideoXRunner] = {}
         self._active_model: str | None = None
 
         # Build runner instances for enabled models
@@ -132,9 +131,7 @@ class LocalRunner:
 
         # Quality → preferred model hint (only if user didn't specify)
         if preferred is None:
-            if quality == "preview":
-                preferred = "ltx"
-            elif quality == "fast":
+            if quality in ("preview", "fast"):
                 preferred = "cogvideox"
             # ultra, high, balanced: use priority order (wan2_14b > wan2_1b > ...)
 
@@ -149,13 +146,13 @@ class LocalRunner:
             if free >= required:
                 return name
 
-        # Force-unload active model and retry ltx (smallest)
+        # Force-unload active model and retry cogvideox (smallest remaining)
         if self._active_model:
             self._runners[self._active_model].unload()
             self._active_model = None
             time.sleep(1)
-            if "ltx" in self._runners:
-                return "ltx"
+            if "cogvideox" in self._runners:
+                return "cogvideox"
 
         raise RuntimeError(
             f"No local model fits in available VRAM ({free:.1f} GB free). "

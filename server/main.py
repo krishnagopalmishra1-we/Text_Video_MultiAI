@@ -81,7 +81,7 @@ class VideoJobRequest(BaseModel):
     strategy: str = Field(default="balanced")      # fast | balanced | quality
     style: str = Field(default="cinematic")
     quality: str = Field(default="high")           # ultra | high | balanced | fast | preview
-    preferred_model: Optional[str] = Field(default=None)  # wan2_14b | wan2_1b | hunyuan | cogvideox | ltx
+    preferred_model: Optional[str] = Field(default=None)  # wan2_14b | wan2_1b | hunyuan | cogvideox
     api_fallback: bool = Field(default=True)        # Runway fallback only after local failures
     pacing: str = Field(default="normal")          # slow | normal | fast
     transition: str = Field(default="crossfade")

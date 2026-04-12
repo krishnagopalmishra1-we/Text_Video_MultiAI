@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-audio", action="store_true")
     p.add_argument("--tts-backend", default="kokoro", choices=["kokoro", "elevenlabs"])
     p.add_argument("--preferred-model", default=None,
-                   choices=["wan2_14b", "wan2_1b", "hunyuan", "cogvideox", "ltx"])
+                   choices=["wan2_14b", "wan2_1b", "hunyuan", "cogvideox"])
     p.add_argument("--strategy", default="balanced",
                    choices=["fast", "balanced", "quality"],
                    help="Generation strategy: fast (1.3B), balanced (14B+upscale), quality (14B+Hunyuan hero)")

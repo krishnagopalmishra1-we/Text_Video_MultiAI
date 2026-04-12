@@ -67,20 +67,6 @@ models:
       offload: false
       notes: "Fast. Use for bulk scenes."
 
-    ltx:
-      enabled: true
-      priority: 4
-      hf_id: "Lightricks/LTX-Video"
-      vram_gb: 10
-      dtype: bfloat16
-      max_frames: 121       # ~5s @ 24fps
-      fps: 24
-      resolution: [768, 512]
-      compile: true
-      flash_attention: false
-      offload: false
-      notes: "Fastest. Preview and fallback."
-
   api:
     runway:
       enabled: true
@@ -163,32 +149,27 @@ quality_presets:
     wan2_1b:  { resolution: [1280, 720], steps: 50 }
     hunyuan:  { resolution: [1280, 720], steps: 50 }
     cogvideox: { resolution: [720, 480], steps: 50 }
-    ltx:      { resolution: [768, 512], steps: 30 }
   high:
     label: "High (1280×720)"
     wan2_14b: { resolution: [1280, 720], steps: 20 }
     wan2_1b:  { resolution: [1280, 720], steps: 20 }
     hunyuan:  { resolution: [1280, 720], steps: 50 }
     cogvideox: { resolution: [720, 480], steps: 50 }
-    ltx:      { resolution: [768, 512], steps: 20 }
   balanced:
     label: "Balanced (848×480, faster)"
     wan2_14b: { resolution: [848, 480], steps: 20 }
     wan2_1b:  { resolution: [848, 480], steps: 20 }
     hunyuan:  { resolution: [848, 480], steps: 30 }
     cogvideox: { resolution: [720, 480], steps: 30 }
-    ltx:      { resolution: [768, 512], steps: 20 }
   fast:
     label: "Fast (848×480, fewer steps)"
     wan2_14b: { resolution: [848, 480], steps: 15 }
     wan2_1b:  { resolution: [848, 480], steps: 15 }
     hunyuan:  { resolution: [848, 480], steps: 20 }
     cogvideox: { resolution: [480, 320], steps: 25 }
-    ltx:      { resolution: [512, 320], steps: 15 }
   preview:
     label: "Preview (480×320, draft)"
     wan2_14b: { resolution: [480, 320], steps: 10 }
     wan2_1b:  { resolution: [480, 320], steps: 10 }
     hunyuan:  { resolution: [480, 320], steps: 15 }
     cogvideox: { resolution: [480, 320], steps: 20 }
-    ltx:      { resolution: [512, 320], steps: 10 }
