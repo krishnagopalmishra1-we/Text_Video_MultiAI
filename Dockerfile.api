@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 COPY server/ ./server/
 COPY db/ ./db/
 COPY config/ ./config/
+COPY pipeline/ ./pipeline/
 
 # Create output dirs
 RUN mkdir -p /app/outputs/{audio,final,scenes,upscaled}
