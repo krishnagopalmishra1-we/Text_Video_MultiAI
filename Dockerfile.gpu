@@ -50,4 +50,4 @@ RUN python /tmp/patch_diffusers.py && rm /tmp/patch_diffusers.py
 COPY . .
 
 # GPU worker entry point
-CMD ["celery", "-A", "server.tasks", "worker", "-l", "info", "-Q", "gpu", "-c", "1", "-m", "fair"]
+CMD ["celery", "-A", "server.tasks", "worker", "-l", "info", "-Q", "gpu", "-c", "1", "-P", "solo"]
