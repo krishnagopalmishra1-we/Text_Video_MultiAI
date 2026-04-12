@@ -72,10 +72,12 @@ def _warmup_gpu_worker(**kwargs):
             return
         from video_engine.models.wan2 import Wan2Runner
         runner = Wan2Runner(wan_cfg)
-        runner.warmup()
-        logger.info("GPU worker warmup complete.")
+        # Load model only (no warmup inference — torch.compile warmup
+        # can crash the inductor subprocess pool on some envs).
+        runner.load()
+        logger.info("GPU worker model pre-loaded (skipping compile warmup).")
     except Exception as e:
-        logger.warning(f"GPU worker warmup failed (non-fatal): {e}")
+        logger.warning(f"GPU worker pre-load failed (non-fatal): {e}")
 
 
 # ------------------------------------------------------------------
