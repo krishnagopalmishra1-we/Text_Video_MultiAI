@@ -46,7 +46,7 @@ def submit(name, model, strategy):
         "min_clip": 10,
         "max_clip": 15,
         "transition": "crossfade",
-        "use_dag": True,
+        "use_dag": False,
     }).encode()
     req = urllib.request.Request(
         f"{API}/generate_video",
