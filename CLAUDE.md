@@ -1,8 +1,13 @@
 # CLAUDE.md — Memory & Working Context
 
+## Standing Rule: Think Holistically
+**Always trace the full system impact before any change.** No short-sighted fixes.
+Before touching config, pipeline, or model code: follow the chain through router → local_runner → model → strategy → stitcher. Update CLAUDE.md and memory when architectural decisions are made. Never propose a change without reading the affected code.
+
 ## Project
 Long-form AI video generator. A100 80GB + 48 CPU cores.
 Three generation strategies: fast / balanced / quality.
+**Speed target: 1-minute video in ≤ 15 minutes end-to-end.**
 
 ## Hardware Context
 - GPU: NVIDIA A100 80GB (NCads A100 V4 — Azure)
@@ -13,8 +18,8 @@ Three generation strategies: fast / balanced / quality.
 ## Model Stack (in priority order)
 | Priority | Model | VRAM | Use case | Acceleration |
 |---|---|---|---|---|
-| 1 | Wan2.1-T2V-14B | ~42GB | Default high quality (balanced/quality) | SageAttn + PAB + TeaCache + FBCache + compile |
-| 2 | Wan2.1-T2V-1.3B | ~8GB | Fast strategy | SageAttn + TeaCache + compile |
+| 1 | Wan2.1-T2V-14B | ~42GB | Default (balanced/quality) | SageAttn + PAB + TeaCache + FBCache (all enabled as of 2026-04-16) |
+| 2 | Wan2.1-T2V-1.3B | ~8GB | Not used — produces blurry/low quality output | — |
 | 3 | HunyuanVideo INT8 | ~37GB | Hero/cinematic scenes (quality only) | bitsandbytes INT8 quantization |
 | 4 | LTX-Video | ~10GB | Preview/fastest (not yet wired) | standard |
 | 5 | Runway Gen-3 | API | Final fallback (only implemented API) | — |
@@ -24,9 +29,9 @@ Three generation strategies: fast / balanced / quality.
 `docs/smoke_test_2026_04_12.md` for full postmortem.
 
 ## Generation Strategies
-- **Fast**: WAN 1.3B, 1280×720 native, 20 steps, ~10 min for 12 clips
-- **Balanced**: WAN 14B, 848×480 + Real-ESRGAN upscale to 1280×720, 15 steps, ~20 min
-- **Quality**: WAN 14B bulk + Hunyuan INT8 hero scenes, 848×480 + upscale, 15/30 steps, ~25 min
+- **Fast**: WAN 1.3B — DO NOT USE. Produces blurry low-quality output. Smoke test confirmed.
+- **Balanced**: WAN 14B, 848×480 + Real-ESRGAN upscale to 1280×720, 15 steps, PAB+TeaCache+FBCache — target ~10-12 min for 1-min video
+- **Quality**: WAN 14B bulk + Hunyuan INT8 hero scenes, 848×480 + upscale, 15/30 steps, ~20-22 min
 
 ## Output Resolutions
 - Generation: 848×480 (balanced/quality) or 1280×720 (fast)
@@ -47,6 +52,8 @@ Three generation strategies: fast / balanced / quality.
 - **VideoRouter singleton** in tasks.py — avoids recreating per request
 - **RunwayClient singleton** in api_runner.py — reuses HTTP connection
 - **Compile order matters** — SageAttn → PAB → caches → compile (last)
+- **Audio parallelism** — orchestrator starts audio in background thread after prompt gen; joins before stitch. Audio runs on CPU while GPU does video. Zero time cost.
+- **WAN 1.3B retired** — do not route production traffic to wan2_1b; quality is unacceptable (blurry output confirmed in smoke test)
 - **Text encoder offload** — moved to CPU after encoding to free VRAM for generation
 
 ## Strict Rules When Modifying
@@ -100,3 +107,52 @@ export HF_TOKEN=...
 - **2026-04-12**: First full 12-run smoke test on Azure A100. 9/12 passed (all WAN + Hunyuan).
   CogVideoX 3/3 failed (HF_TOKEN empty in Docker env). CogVideoX removed from stack.
   See `docs/smoke_test_2026_04_12.md` for full results and outstanding issues.
+- **2026-04-16**: WAN 14B balanced smoke test (sushi chef prompt, 848×480, 15 steps, PAB+TeaCache+FBCache).
+  **Result: 0-second output, blurry, no detail. FAILED.** Speed also unacceptable: ~4 min/clip → ~48 min for 1-min video (target is 15–20 min — 3× over).
+  **Root cause not yet diagnosed** — may be export_to_video bug, WAV frame count issue, or upscaler returning empty frames.
+  **Decision**: Pivot to anime/animation-style video as primary use case (see Animation Pivot section below).
+
+## Speed Problem Analysis (Real-video path)
+- WAN 14B @ 848×480, 15 steps: ~4 min/clip
+- 12 clips for 1-min video = ~48 min. **3× over the 20-min target.**
+- TeaCache/FBCache working (step drops 22s→10s after warmup) but only ~25% speedup total
+- To hit 20-min target with WAN 14B: need ≤100s/clip → requires ~5–6 steps (unacceptable quality)
+- **Only viable real-video path**: Hunyuan INT8 at 15–20 steps (test pending)
+
+## Animation Pivot — Plan for Next Session
+**Decision 2026-04-16**: Anime/animation-style video is the preferred use case.
+Reasons: better storytelling, consistent visual style, smaller/faster models, no uncanny valley.
+
+### Target: 1-min anime/animation video in ≤20 min on A100 80GB
+
+### Models to Evaluate (priority order)
+| Model | VRAM | Speed estimate | Style |
+|---|---|---|---|
+| WAN 14B + anime LoRA | ~42GB | ~4 min/clip | anime/cinematic |
+| WAN 1.3B + anime LoRA | ~8GB | ~50s/clip | anime (need quality check) |
+| CogVideoX-5B (anime checkpoint) | ~20GB | ~2–3 min/clip | anime |
+| AnimateDiff v3 (SDXL) | ~12GB | ~30–60s/clip | anime/stylized |
+| Mochi-1 | ~22GB | ~2 min/clip | stylized |
+
+### Animation Style Requirements
+1. **Anime / Studio Ghibli style** — soft lines, painted BGs, expressive characters
+2. **2D animated** — flat color, motion comics, illustrated characters
+3. **3D animated** — Pixar-style, cel-shaded
+4. **Motion comic** — manga-panel style with subtle animation
+5. **Cinematic anime** — Makoto Shinkai / AoT style: detailed, filmic
+
+### Prompt Engineering for Animation
+- Add style tokens: `anime style, Studio Ghibli, cel-shaded, 2D animation, hand-drawn`
+- Avoid: `photorealistic, live action, real person`
+- Negative: add `photorealistic, live action, 3D render, CGI` when targeting 2D anime
+- For Ghibli: `soft pastel colors, watercolor background, gentle animation`
+- For action anime: `dynamic motion lines, expressive faces, vibrant colors, dramatic lighting`
+
+### Next Session Action Items
+1. Diagnose 0-second output bug in current WAN 14B run (check `export_to_video`, frame count, upscaler)
+2. Test WAN 14B with anime-style prompt at 848×480, 15 steps — does quality improve?
+3. Test WAN 1.3B with anime LoRA (smaller model, faster — acceptable if anime style hides low-res)
+4. Research and test CogVideoX anime checkpoints (may need HF_TOKEN fix first)
+5. Evaluate AnimateDiff — fastest option but different pipeline
+6. Pick best model, set as default strategy for animation content
+7. Add `animation_style` parameter to scene prompts and strategy config

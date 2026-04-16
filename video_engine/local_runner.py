@@ -103,7 +103,7 @@ class LocalRunner:
             f"Scene {scene.scene_id} → {model_name} "
             f"({width}x{height}, {steps} steps, strategy={strategy or 'none'}, hero={is_hero})"
         )
-        return runner.generate(
+        kwargs: dict = dict(
             prompt=scene.video_prompt or scene.text,
             duration=scene.duration,
             output_path=out_path,
@@ -113,6 +113,9 @@ class LocalRunner:
             num_inference_steps=steps,
             seed=seed if seed is not None else scene.scene_id,
         )
+        if mcfg.get("negative_prompt"):
+            kwargs["negative_prompt"] = mcfg["negative_prompt"]
+        return runner.generate(**kwargs)
 
     def unload_all(self) -> None:
         for r in self._runners.values():

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import logging
 import sys
 import time
@@ -99,7 +100,31 @@ def main() -> None:
     scenes = asyncio.run(pe.generate_batch(scenes, concurrency=4))
     logger.info("  → Prompts generated.")
 
-    # ── 3. Video generation ─────────────────────────────────────────
+    # ── 3. Video generation + audio in parallel ─────────────────────
+    # Audio (TTS + music) is CPU-only and only needs the scene list.
+    # Start it immediately so it overlaps with GPU video generation.
+    _audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    _audio_future = None
+
+    if not args.no_audio:
+        _scenes_snapshot = list(scenes)
+        _total_dur = sum(s.duration for s in _scenes_snapshot)
+        _audio_out = out_dir / "audio"
+        _style = args.style
+
+        def _run_audio():
+            from audio import TTSEngine, MusicEngine, AudioSync
+            tts = TTSEngine()
+            narration = tts.synthesize_full(_scenes_snapshot, _audio_out / "narration.wav")
+            music_engine = MusicEngine()
+            music = music_engine.generate_for_video(_style, _total_dur, _audio_out / "music.wav")
+            music_engine.unload()
+            syncer = AudioSync()
+            return syncer.mix(narration, music, _audio_out / "mixed.aac", _total_dur, _scenes_snapshot)
+
+        logger.info("Step 3+4/5: Starting audio generation in background (CPU)…")
+        _audio_future = _audio_executor.submit(_run_audio)
+
     logger.info("Step 3/5: Generating scene clips…")
     from video_engine import VideoRouter
     router = VideoRouter(
@@ -128,29 +153,17 @@ def main() -> None:
         logger.info(f"    ✓ {path.name} [{time.time()-t:.1f}s]")
     router.cleanup()
 
-    # ── 4. Audio ────────────────────────────────────────────────────
+    # ── 4. Collect audio (already running in background) ────────────
     audio_path = None
-    if not args.no_audio:
-        logger.info("Step 4/5: Generating audio (TTS + music)…")
-        from audio import TTSEngine, MusicEngine, AudioSync
-        total_dur = sum(s.duration for s in scenes)
-
-        tts = TTSEngine()
-        narration = tts.synthesize_full(scenes, out_dir / "audio" / "narration.wav")
-        logger.info("  → Narration done.")
-
-        music_engine = MusicEngine()
-        music = music_engine.generate_for_video(
-            args.style, total_dur, out_dir / "audio" / "music.wav"
-        )
-        music_engine.unload()
-        logger.info("  → Music done.")
-
-        syncer = AudioSync()
-        audio_path = syncer.mix(
-            narration, music, out_dir / "audio" / "mixed.aac", total_dur, scenes
-        )
-        logger.info("  → Audio mixed.")
+    if _audio_future is not None:
+        logger.info("Step 4/5: Waiting for audio to finish…")
+        try:
+            audio_path = _audio_future.result()
+            logger.info("  → Audio ready.")
+        except Exception as e:
+            logger.warning(f"  ✗ Audio failed: {e} — stitching without audio.")
+        finally:
+            _audio_executor.shutdown(wait=False)
     else:
         logger.info("Step 4/5: Audio skipped (--no-audio).")
 

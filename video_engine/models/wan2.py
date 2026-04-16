@@ -1,6 +1,14 @@
 """
-Wan2.1-T2V-14B wrapper — primary model on A100 80GB.
+Wan2.1-T2V wrapper — primary model on A100 80GB.
 ~40GB VRAM in bfloat16. Best quality/speed tradeoff.
+
+LoRA support:
+  Configure in model_config.yaml under models.local.wan2_14b.lora_weights:
+    - path: "username/my-lora"        # HF repo or local path
+      weight_name: "lora.safetensors" # optional
+      scale: 0.85                     # 0.0–1.0
+      name: "cinematic"               # adapter label (optional)
+  LoRAs are fused into weights at model load — no per-inference overhead.
 """
 from __future__ import annotations
 
@@ -117,7 +125,10 @@ class Wan2Runner:
             except Exception as e:
                 logger.warning(f"FBCache unavailable: {e}")
 
-        # ── 6. torch.compile — AFTER all hooks, text encoder stays on GPU ──
+        # ── 6. LoRA weights — fuse before compile ────────────────────
+        self._apply_loras()
+
+        # ── 7. torch.compile — AFTER all hooks, text encoder stays on GPU ──
         # B2 fix: compile traces the transformer assuming all modules are on
         # the same device. Moving text_encoder to CPU AFTER compile would
         # cause device mismatch on inference. So: compile first, THEN
@@ -140,6 +151,62 @@ class Wan2Runner:
             self.pipe.text_encoder.to("cpu")
             torch.cuda.empty_cache()
             logger.info("Text encoder moved to CPU to free VRAM.")
+
+    # ------------------------------------------------------------------
+    # LoRA
+    # ------------------------------------------------------------------
+
+    def _apply_loras(self) -> None:
+        """Load, fuse, and unload LoRA weights from config.
+        Fusing bakes LoRA deltas into base weights — zero per-inference overhead.
+        """
+        loras = self.cfg.get("lora_weights", [])
+        if not loras:
+            return
+
+        adapter_names: list[str] = []
+        adapter_scales: list[float] = []
+
+        for i, lc in enumerate(loras):
+            path = lc.get("path") or lc.get("hf_id")
+            if not path:
+                logger.warning(f"Wan2 LoRA entry {i} missing 'path'/'hf_id' — skipping")
+                continue
+            scale = float(lc.get("scale", 0.8))
+            weight_name = lc.get("weight_name")
+            adapter_name = lc.get("name", f"lora_{i}")
+
+            load_kwargs: dict = {
+                "pretrained_model_name_or_path_or_dict": path,
+                "adapter_name": adapter_name,
+            }
+            if weight_name:
+                load_kwargs["weight_name"] = weight_name
+
+            try:
+                self.pipe.load_lora_weights(**load_kwargs)
+                adapter_names.append(adapter_name)
+                adapter_scales.append(scale)
+                logger.info(f"Loaded LoRA '{adapter_name}' from {path} (scale={scale})")
+            except Exception as e:
+                logger.warning(f"Failed to load LoRA '{adapter_name}' from {path}: {e}")
+
+        if not adapter_names:
+            return
+
+        try:
+            self.pipe.set_adapters(adapter_names, adapter_weights=adapter_scales)
+            self.pipe.fuse_lora()
+            self.pipe.unload_lora_weights()
+            logger.info(f"Fused {len(adapter_names)} LoRA adapter(s) into Wan2 weights.")
+        except Exception as e:
+            logger.warning(f"LoRA fuse failed — running without LoRA: {e}")
+            try:
+                self.pipe.unload_lora_weights()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
 
     @property
     def _text_encoder_on_cpu(self) -> bool:
@@ -204,13 +271,19 @@ class Wan2Runner:
     def generate(
         self,
         prompt: str,
-        negative_prompt: str = "blurry, low quality, watermark, text, cartoon",
+        negative_prompt: str = (
+            "blurry, out of focus, low resolution, pixelated, compression artifacts, "
+            "watermark, text overlay, subtitles, logo, distorted, deformed, "
+            "cartoon, anime, illustration, painting, CGI, 3D render, "
+            "overexposed, underexposed, washed out, oversaturated, noise, grain, "
+            "shaky camera, jerky motion, duplicate frames, worst quality, low quality"
+        ),
         duration: float = 5.0,
         output_path: str | Path | None = None,
         fps: int | None = None,
         width: int = 1280,
         height: int = 720,
-        guidance_scale: float = 5.0,
+        guidance_scale: float = 7.0,   # raised from 5.0 — better prompt adherence
         num_inference_steps: int = 20,
         seed: int | None = None,
         progress_callback=None,

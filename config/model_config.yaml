@@ -14,12 +14,16 @@ models:
       fps: 16
       resolution: [1280, 720]
       compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
-      flash_attention: true
-      teacache: true
-      teacache_thresh: 0.1
+      sage_attention: true    # 1.5–1.7× faster than FA2; falls back if not installed
+      flash_attention: true   # fallback if SageAttention unavailable
+      pab: true               # Pyramid Attention Broadcast — skips redundant attention blocks
+      tea_cache: true         # TeaCache step-level caching — ~20–30% speedup, zero quality loss
+      teacache_thresh: 0.1    # conservative threshold — quality first
+      fb_cache: true          # First-Block Cache — ~10% additional speedup
       default_steps: 20
       offload: false
-      notes: "14B — best quality. Used in Balanced and Quality strategies."
+      negative_prompt: "blurry, out of focus, low resolution, pixelated, compression artifacts, watermark, text overlay, subtitles, logo, distorted, deformed, cartoon, anime, illustration, painting, CGI, 3D render, overexposed, underexposed, washed out, oversaturated, noise, grain, shaky camera, jerky motion, duplicate frames, worst quality, low quality"
+      notes: "14B — best quality. PAB + TeaCache + FBCache all enabled. Balanced and Quality strategies."
 
     wan2_1b:
       enabled: true
@@ -51,6 +55,7 @@ models:
       compile: false
       flash_attention: true
       offload: false
+      negative_prompt: "blurry, out of focus, low resolution, pixelated, compression artifacts, watermark, text overlay, subtitles, logo, distorted, deformed, cartoon, anime, illustration, painting, CGI, 3D render, overexposed, underexposed, washed out, oversaturated, noise, grain, shaky camera, jerky motion, duplicate frames, worst quality, low quality"
       notes: "HunyuanVideo INT8 — hero scenes in Quality strategy."
 
   api:
