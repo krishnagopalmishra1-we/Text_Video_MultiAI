@@ -1,15 +1,13 @@
 """
 Prompt engine: converts scene text → rich video generation prompts.
-Uses Claude API for semantic enrichment, with local fallback.
+Uses Gemma 4 31B (Google AI Studio) for semantic enrichment, with local fallback.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 from pathlib import Path
-from typing import Literal
 
-import anthropic
 import yaml
 
 from scene_splitter import SceneData
@@ -43,7 +41,7 @@ class PromptEngine:
         style: str = "cinematic",
         camera: str = "dolly_forward",
         use_llm: bool = True,
-        model: str = "claude-haiku-4-5-20251001",  # fast + cheap for bulk
+        model: str = "gemma-4-31b-it",
     ):
         self.style = style
         self.camera = camera
@@ -53,14 +51,13 @@ class PromptEngine:
         with open(presets_path) as f:
             self.presets = yaml.safe_load(f)
 
-        self._client: anthropic.AsyncAnthropic | None = None
+        self._client = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     async def generate(self, scene: SceneData) -> str:
-        """Generate a video prompt for a single scene."""
         style = scene.style_hint or self.style
         camera = scene.camera_hint or self.camera
 
@@ -73,19 +70,18 @@ class PromptEngine:
                 _log.getLogger(__name__).warning(
                     "LLM prompt generation failed for scene %s: %s", scene.scene_id, e
                 )
-                # fall through to template
 
         return build_prompt(scene.narration or scene.text, style, camera, self.presets)
 
     async def generate_batch(
         self, scenes: list[SceneData], concurrency: int = 4
     ) -> list[SceneData]:
-        """Enrich all scenes with video_prompt in parallel."""
         sem = asyncio.Semaphore(concurrency)
 
         async def _enrich(scene: SceneData) -> SceneData:
             async with sem:
-                scene.video_prompt = await self.generate(scene)
+                if not scene.video_prompt:
+                    scene.video_prompt = await self.generate(scene)
             return scene
 
         return await asyncio.gather(*[_enrich(s) for s in scenes])
@@ -94,12 +90,13 @@ class PromptEngine:
     # Internal
     # ------------------------------------------------------------------
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self):
         if self._client is None:
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            from google import genai
+            api_key = os.environ.get("Gemini_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
             if not api_key:
-                raise EnvironmentError("ANTHROPIC_API_KEY not set")
-            self._client = anthropic.AsyncAnthropic(api_key=api_key)
+                raise EnvironmentError("Gemini_API_KEY not set")
+            self._client = genai.Client(api_key=api_key)
         return self._client
 
     async def _llm_prompt(
@@ -107,15 +104,18 @@ class PromptEngine:
     ) -> str:
         client = self._get_client()
         user_msg = USER_TEMPLATE.format(
-            text=text[:800],  # guard token limit
+            text=text[:800],
             style=style,
             camera=camera.replace("_", " "),
             duration=int(duration),
         )
-        response = await client.messages.create(
-            model=self.model,
-            max_tokens=200,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
+        full_prompt = (SYSTEM_PROMPT + "\n\n" + user_msg).encode('ascii', errors='replace').decode('ascii')
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
+            )
         )
-        return response.content[0].text.strip()
+        return response.text.strip()

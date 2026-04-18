@@ -4,9 +4,9 @@ from __future__ import annotations
 
 STYLE_PRESETS: dict[str, dict] = {
     "cinematic": {
-        "prefix": "cinematic film shot, 35mm, anamorphic lens, shallow depth of field, golden hour lighting,",
-        "suffix": ", film grain, color graded, ultra realistic, 8K",
-        "negative": "cartoon, animation, blurry, low quality, watermark, text, CGI",
+        "prefix": "cinematic film shot, 35mm, anamorphic lens, shallow depth of field, golden hour lighting, vibrant warm colors, high contrast, sharp details, professional color grading,",
+        "suffix": ", film grain, ultra realistic, 8K, highly detailed, vivid",
+        "negative": "cartoon, animation, blurry, low quality, watermark, text, CGI, dark, black, dull, dim, desaturated, monochrome, underexposed, flat lighting, washed out, murky, shadow-heavy, low contrast",
     },
     "documentary": {
         "prefix": "documentary style, natural lighting, handheld camera, realistic,",
@@ -32,6 +32,11 @@ STYLE_PRESETS: dict[str, dict] = {
         "prefix": "dramatic cinematic, high contrast Rembrandt lighting, moody atmosphere, powerful composition,",
         "suffix": ", epic scale, emotional impact, IMAX quality",
         "negative": "flat, boring, low contrast, comedy, casual",
+    },
+    "horror": {
+        "prefix": "horror cinematic, bright cold silver moonlight as primary light source, high contrast chiaroscuro, fully visible subject, atmospheric pale mist, dramatic depth, sharp detailed textures,",
+        "suffix": ", 35mm film grain, atmospheric depth, high detail, visible and detailed",
+        "negative": "cartoon, animation, blurry, low quality, watermark, text, CGI, pitch black, completely dark, flat black, black screen, invisible, underexposed, flat lighting, washed out, bright comedy lighting, cheerful, warm sunlight",
     },
 }
 

@@ -1,0 +1,32 @@
+[
+  {
+    "duration": 8,
+    "text": "Explorer stands at desert ruins at golden hour",
+    "video_prompt": "Ancient stone ruins stretching across vast desert landscape, aerial pullback shot, brilliant golden hour sunlight, warm amber and orange tones, lone female explorer in brown leather jacket standing at cliff edge, crumbling stone pillars glowing in rich warm sunset light, vibrant saturated color palette, sharp detail, cinematic 35mm anamorphic, high contrast, vivid"
+  },
+  {
+    "duration": 8,
+    "text": "She descends into the ancient corridor",
+    "video_prompt": "Ancient stone corridor with intricate carved blue-glowing runes covering walls, warm amber torch firelight illuminating stone textures, young woman explorer walking forward torch raised, breath mist visible, rich blue and amber color contrast, vibrant atmospheric lighting, detailed carved stonework, smooth dolly forward camera, cinematic 35mm film, vivid colors, sharp"
+  },
+  {
+    "duration": 8,
+    "text": "She discovers the sealed golden door",
+    "video_prompt": "Massive ornate golden door covered in brilliant glowing amber symbols, ancient carved stone wall, female explorer reaching toward door, golden energy pulsing and flaring brightly outward, warm golden light flooding entire scene, vibrant gold and amber color palette, rich texture detail, close-up on wide eyes reflecting brilliant golden glow, cinematic 35mm, sharp, vivid"
+  },
+  {
+    "duration": 8,
+    "text": "The door opens revealing a vast treasure chamber",
+    "video_prompt": "Enormous ancient chamber flooded with brilliant golden volumetric light, hundreds of golden artifacts floating spinning slowly in midair, warm amber and gold atmosphere, female explorer silhouette against radiant golden background, glowing light rays streaming through chamber, vibrant gold and cream color palette, wide shot revealing massive cathedral scale, cinematic 35mm anamorphic, vivid, highly detailed"
+  },
+  {
+    "duration": 8,
+    "text": "She walks among the floating relics",
+    "video_prompt": "Female explorer slowly walking between floating golden relics in vast warmly-lit ancient chamber, soft golden amber lighting, polished golden artifacts spinning and reflecting warm light, woman pausing staring at her own reflection in a large floating golden artifact, serene warm atmospheric glow, vibrant amber and gold tones, smooth slow side pan camera, cinematic, sharp, vivid"
+  },
+  {
+    "duration": 10,
+    "text": "She escapes as the chamber collapses",
+    "video_prompt": "Female explorer sprinting fast through ancient stone corridor, golden artifacts crashing to stone floor behind her with flying dust and debris, massive stone door slowly grinding shut ahead, woman diving through narrowing gap at last second, rolling out onto warm sandy desert surface in bright golden sunset light, dynamic motion blur, warm amber orange light, cinematic pullback, vivid, sharp"
+  }
+]

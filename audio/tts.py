@@ -110,5 +110,5 @@ class TTSEngine:
                 "pip install kokoro>=0.9.4 soundfile\n"
                 "Linux also needs: apt-get install espeak-ng"
             )
-        self._pipeline = KPipeline(lang_code="a")
-        logger.info("Kokoro TTS loaded.")
+        self._pipeline = KPipeline(lang_code="a", device="cpu")
+        logger.info("Kokoro TTS loaded (CPU).")

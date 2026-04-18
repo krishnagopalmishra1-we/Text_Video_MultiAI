@@ -34,6 +34,7 @@ class Wan2Runner:
         self.variant = "fp16" if self.dtype == torch.float16 else "bf16"
         self._prompt_cache: dict[str, object] = {}
         self._warmed_up = False
+        self._current_timestep: list[int] = [1000]  # updated each step for PAB/FasterCache
 
     def load(self) -> None:
         if self.pipe is not None:
@@ -69,22 +70,30 @@ class Wan2Runner:
         _sage_ok = False
         if self.cfg.get("sage_attention", False):
             try:
-                from sageattention import sageattn
-                torch.nn.functional.scaled_dot_product_attention = sageattn
+                from sageattention import sageattn as _sageattn_raw
+                def _sageattn_compat(query=None, key=None, value=None, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kwargs):
+                    # WAN cross-attention passes mixed dtypes (text encoder fp32, model bf16).
+                    # sageattn asserts all same dtype — cast to bf16, cast output back.
+                    orig_dtype = query.dtype
+                    out = _sageattn_raw(
+                        query.to(torch.bfloat16),
+                        key.to(torch.bfloat16),
+                        value.to(torch.bfloat16),
+                        is_causal=is_causal,
+                    )
+                    return out.to(orig_dtype)
+                torch.nn.functional.scaled_dot_product_attention = _sageattn_compat
                 _sage_ok = True
                 logger.info("SageAttention monkey-patched (replaces FA2).")
             except ImportError:
                 logger.warning("sageattention not installed — falling back to flash_attention.")
 
         if not _sage_ok and self.cfg.get("flash_attention"):
-            try:
-                self.pipe.transformer.enable_flash_attn()
-                logger.info("Flash Attention enabled on transformer.")
-            except Exception as e:
-                logger.warning(f"Flash Attention not available: {e} -- skipping.")
+            # PyTorch SDPA uses FlashAttention automatically on A100 + CUDA 12+
+            logger.info("Flash Attention: relying on PyTorch SDPA (automatic on A100/CUDA12+).")
 
         # ── 3. Attention caching (PAB) ───────────────────────────────
-        if self.cfg.get("teacache") or self.cfg.get("pab"):
+        if self.cfg.get("pab"):
             try:
                 from diffusers.hooks import apply_pyramid_attention_broadcast
                 from diffusers.hooks.pyramid_attention_broadcast import PyramidAttentionBroadcastConfig
@@ -95,24 +104,27 @@ class Wan2Runner:
                     spatial_attention_timestep_skip_range=(100, 800),
                     temporal_attention_timestep_skip_range=(100, 800),
                     cross_attention_timestep_skip_range=(100, 800),
+                    current_timestep_callback=lambda: self._current_timestep[0],
                 )
                 apply_pyramid_attention_broadcast(self.pipe.transformer, pab_config)
                 logger.info("PAB (Pyramid Attention Broadcast) applied.")
             except Exception as e:
                 logger.warning(f"PAB unavailable: {e}")
 
-        # ── 4. TeaCache (step-level caching) ─────────────────────────
+        # ── 4. FasterCache (replaces TeaCache — diffusers 0.37+) ─────
         if self.cfg.get("tea_cache"):
             try:
-                from diffusers.hooks import apply_tea_cache
-                from diffusers.hooks.tea_cache import TeaCacheConfig
-                tea_cfg = TeaCacheConfig(
-                    threshold=self.cfg.get("teacache_thresh", 0.15),
+                from diffusers.hooks import apply_faster_cache
+                from diffusers.hooks.faster_cache import FasterCacheConfig
+                faster_cfg = FasterCacheConfig(
+                    spatial_attention_block_skip_range=2,
+                    current_timestep_callback=lambda: self._current_timestep[0],
+                    is_guidance_distilled=True,
                 )
-                apply_tea_cache(self.pipe.transformer, tea_cfg)
-                logger.info("TeaCache applied.")
+                apply_faster_cache(self.pipe.transformer, faster_cfg)
+                logger.info("FasterCache applied (diffusers 0.37+ replacement for TeaCache).")
             except Exception as e:
-                logger.warning(f"TeaCache unavailable: {e}")
+                logger.warning(f"FasterCache unavailable: {e}")
 
         # ── 5. First-Block Cache (FBCache) ───────────────────────────
         if self.cfg.get("fb_cache"):
@@ -249,14 +261,14 @@ class Wan2Runner:
         torch.cuda.empty_cache()
 
     def _encode_prompt(self, prompt: str, negative_prompt: str):
-        """Cache text embeddings so the text encoder isn't re-run for repeated prompts."""
+        """Cache text embeddings. Returns (prompt_embeds, neg_embeds, attn_mask, neg_attn_mask)."""
         cache_key = f"{prompt}|{negative_prompt}"
         if cache_key in self._prompt_cache:
             return self._prompt_cache[cache_key]
 
         if self._text_encoder_on_cpu:
             self.pipe.text_encoder.to(self.device)
-        embeds = self.pipe.encode_prompt(
+        result = self.pipe.encode_prompt(
             prompt=prompt,
             negative_prompt=negative_prompt,
         )
@@ -264,8 +276,8 @@ class Wan2Runner:
             self.pipe.text_encoder.to("cpu")
             torch.cuda.empty_cache()
 
-        self._prompt_cache[cache_key] = embeds
-        return embeds
+        self._prompt_cache[cache_key] = result
+        return result
 
     @torch.inference_mode()
     def generate(
@@ -306,22 +318,34 @@ class Wan2Runner:
         prompt_embeds = self._encode_prompt(prompt, negative_prompt)
 
         def _step_callback(pipe, step, timestep, callback_kwargs):
+            self._current_timestep[0] = int(timestep)
             if progress_callback:
                 progress_callback(step=step, total_steps=num_inference_steps)
             return callback_kwargs
 
+        # encode_prompt returns (prompt_embeds, neg_embeds, attn_mask, neg_attn_mask)
+        pe, ne = prompt_embeds[0], prompt_embeds[1]
+        attn = prompt_embeds[2] if len(prompt_embeds) > 2 else None
+        neg_attn = prompt_embeds[3] if len(prompt_embeds) > 3 else None
+
+        call_kwargs: dict = dict(
+            prompt_embeds=pe,
+            negative_prompt_embeds=ne,
+            num_frames=num_frames,
+            width=width,
+            height=height,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            generator=gen,
+            callback_on_step_end=_step_callback,
+        )
+        if attn is not None:
+            call_kwargs["prompt_attention_mask"] = attn
+        if neg_attn is not None:
+            call_kwargs["negative_prompt_attention_mask"] = neg_attn
+
         with torch.autocast("cuda", dtype=self.dtype):
-            output = self.pipe(
-                prompt_embeds=prompt_embeds[0],
-                negative_prompt_embeds=prompt_embeds[1],
-                num_frames=num_frames,
-                width=width,
-                height=height,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                generator=gen,
-                callback_on_step_end=_step_callback,
-            )
+            output = self.pipe(**call_kwargs)
 
         frames = output.frames[0]
         out_path = Path(output_path) if output_path else Path(f"/tmp/wan2_{seed or 0}.mp4")

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import concurrent.futures
 import logging
 import sys
 import time
@@ -34,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Long Video Generator")
     p.add_argument("--script", required=True, help="Script file or inline text")
     p.add_argument("--style", default="cinematic",
-                   choices=["cinematic", "documentary", "commercial", "sci_fi", "nature", "dramatic"])
+                   choices=["cinematic", "documentary", "commercial", "sci_fi", "nature", "dramatic", "horror"])
     p.add_argument("--quality", default="high", choices=["high", "fast", "preview"])
     p.add_argument("--pacing", default="normal", choices=["slow", "normal", "fast"])
     p.add_argument("--transition", default="crossfade",
@@ -100,31 +99,11 @@ def main() -> None:
     scenes = asyncio.run(pe.generate_batch(scenes, concurrency=4))
     logger.info("  → Prompts generated.")
 
-    # ── 3. Video generation + audio in parallel ─────────────────────
-    # Audio (TTS + music) is CPU-only and only needs the scene list.
-    # Start it immediately so it overlaps with GPU video generation.
-    _audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    _audio_future = None
-
-    if not args.no_audio:
-        _scenes_snapshot = list(scenes)
-        _total_dur = sum(s.duration for s in _scenes_snapshot)
-        _audio_out = out_dir / "audio"
-        _style = args.style
-
-        def _run_audio():
-            from audio import TTSEngine, MusicEngine, AudioSync
-            tts = TTSEngine()
-            narration = tts.synthesize_full(_scenes_snapshot, _audio_out / "narration.wav")
-            music_engine = MusicEngine()
-            music = music_engine.generate_for_video(_style, _total_dur, _audio_out / "music.wav")
-            music_engine.unload()
-            syncer = AudioSync()
-            return syncer.mix(narration, music, _audio_out / "mixed.aac", _total_dur, _scenes_snapshot)
-
-        logger.info("Step 3+4/5: Starting audio generation in background (CPU)…")
-        _audio_future = _audio_executor.submit(_run_audio)
-
+    # ── 3. Video generation ─────────────────────────────────────────
+    # Audio runs AFTER video (step 4) to avoid a race condition:
+    # BitsAndBytes INT8 quantization calls accelerate.init_empty_weights()
+    # which globally patches nn.Module.__init__ to use meta device. If Kokoro
+    # loads concurrently its weight_norm layers get initialized on meta → crash.
     logger.info("Step 3/5: Generating scene clips…")
     from video_engine import VideoRouter
     router = VideoRouter(
@@ -153,17 +132,40 @@ def main() -> None:
         logger.info(f"    ✓ {path.name} [{time.time()-t:.1f}s]")
     router.cleanup()
 
-    # ── 4. Collect audio (already running in background) ────────────
+    # ── 3.5. Upscale clips via Real-ESRGAN ──────────────────────────
+    logger.info("Step 3.5/5: Upscaling clips via Real-ESRGAN → 1920×1080…")
+    try:
+        from video_engine.upscaler import Upscaler
+        upscaler = Upscaler(tile_size=512, target_width=1920, target_height=1080)
+        upscale_dir = out_dir / "scenes_upscaled"
+        clip_paths = upscaler.upscale_batch(
+            clip_paths, upscale_dir, target_width=1920, target_height=1080
+        )
+        logger.info("  → Upscale complete.")
+    except Exception as e:
+        logger.warning(f"  ✗ Upscale failed: {e} — using raw clips.")
+
+    # ── 4. Audio (TTS + music) ──────────────────────────────────────
     audio_path = None
-    if _audio_future is not None:
-        logger.info("Step 4/5: Waiting for audio to finish…")
+    if not args.no_audio:
+        logger.info("Step 4/5: Generating audio (TTS + music)…")
+        _total_dur = sum(s.duration for s in scenes)
+        _audio_out = out_dir / "audio"
         try:
-            audio_path = _audio_future.result()
+            import gc, torch
+            gc.collect()
+            torch.cuda.empty_cache()
+            from audio import TTSEngine, MusicEngine, AudioSync
+            tts = TTSEngine()
+            narration = tts.synthesize_full(scenes, _audio_out / "narration.wav")
+            music_engine = MusicEngine()
+            music = music_engine.generate_for_video(args.style, _total_dur, _audio_out / "music.wav")
+            music_engine.unload()
+            syncer = AudioSync()
+            audio_path = syncer.mix(narration, music, _audio_out / "mixed.aac", _total_dur, scenes)
             logger.info("  → Audio ready.")
         except Exception as e:
             logger.warning(f"  ✗ Audio failed: {e} — stitching without audio.")
-        finally:
-            _audio_executor.shutdown(wait=False)
     else:
         logger.info("Step 4/5: Audio skipped (--no-audio).")
 

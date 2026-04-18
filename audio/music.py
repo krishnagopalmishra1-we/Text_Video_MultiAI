@@ -126,6 +126,7 @@ class MusicEngine:
             "sci_fi": "futuristic electronic ambient, synthesizers, space atmosphere",
             "nature": "peaceful nature ambient, birds, gentle wind, acoustic guitar",
             "dramatic": "intense dramatic orchestral, percussion, building tension",
+            "horror": "dark horror ambient score, eerie strings, dissonant piano, unsettling silence, tension",
         }
         prompt = prompt_map.get(style, "cinematic background music, high quality")
         return self.generate(prompt, total_duration, output_path)

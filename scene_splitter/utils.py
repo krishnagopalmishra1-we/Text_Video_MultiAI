@@ -38,11 +38,7 @@ def split_sentences(text: str) -> list[str]:
         pass
 
     # Regex fallback
-    sentence_endings = re.compile(
-        r"(?<!\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|Inc|Ltd|Corp))"
-        r"(?<=[.!?])\s+"
-    )
-    parts = sentence_endings.split(text.strip())
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\"'(])", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
 

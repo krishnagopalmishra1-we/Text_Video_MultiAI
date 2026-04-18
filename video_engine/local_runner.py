@@ -4,7 +4,9 @@ Only one large model loaded at a time. Smaller models can coexist.
 """
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 import time
 from pathlib import Path
 
@@ -31,6 +33,34 @@ def _free_vram_gb() -> float:
         return 0.0
     free, total = torch.cuda.mem_get_info()
     return free / 1e9
+
+
+def _clip_duration(path: Path) -> float:
+    result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+         "-of", "json", str(path)],
+        capture_output=True, text=True,
+    )
+    return float(json.loads(result.stdout)["format"]["duration"])
+
+
+def _ensure_duration(path: Path, target: float) -> Path:
+    """Loop-tile clip with ffmpeg if model capped it below requested duration."""
+    try:
+        actual = _clip_duration(path)
+    except Exception:
+        return path
+    if actual >= target - 0.5:
+        return path
+    logger.info(f"  Clip {path.name} is {actual:.1f}s, requested {target:.1f}s — looping to fill.")
+    tmp = path.with_stem(path.stem + "_loop")
+    subprocess.run(
+        ["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(path),
+         "-t", str(target), "-c", "copy", str(tmp)],
+        check=True, capture_output=True,
+    )
+    tmp.replace(path)
+    return path
 
 
 class LocalRunner:
@@ -103,6 +133,8 @@ class LocalRunner:
             f"Scene {scene.scene_id} → {model_name} "
             f"({width}x{height}, {steps} steps, strategy={strategy or 'none'}, hero={is_hero})"
         )
+        guidance = strat.get("guidance_scale", mcfg.get("guidance_scale", 7.0)) if strat else mcfg.get("guidance_scale", 7.0)
+
         kwargs: dict = dict(
             prompt=scene.video_prompt or scene.text,
             duration=scene.duration,
@@ -111,11 +143,14 @@ class LocalRunner:
             width=width,
             height=height,
             num_inference_steps=steps,
+            guidance_scale=guidance,
             seed=seed if seed is not None else scene.scene_id,
         )
         if mcfg.get("negative_prompt"):
             kwargs["negative_prompt"] = mcfg["negative_prompt"]
-        return runner.generate(**kwargs)
+        clip = runner.generate(**kwargs)
+        clip = _ensure_duration(clip, scene.duration)
+        return clip
 
     def unload_all(self) -> None:
         for r in self._runners.values():

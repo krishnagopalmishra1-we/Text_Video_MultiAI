@@ -4,6 +4,9 @@
 **Always trace the full system impact before any change.** No short-sighted fixes.
 Before touching config, pipeline, or model code: follow the chain through router → local_runner → model → strategy → stitcher. Update CLAUDE.md and memory when architectural decisions are made. Never propose a change without reading the affected code.
 
+## Standing Rule: No Guesswork
+**Never guess, assume, or speculate about errors, behavior, or state.** Read the actual logs, source code, or live system before drawing conclusions. If the answer requires a tool call (log read, source inspect, live test), make that call first. Do not fabricate explanations that sound plausible — only report what the evidence shows. If evidence is insufficient, say so explicitly and fetch more before proceeding.
+
 ## Project
 Long-form AI video generator. A100 80GB + 48 CPU cores.
 Three generation strategies: fast / balanced / quality.

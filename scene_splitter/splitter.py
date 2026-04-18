@@ -124,6 +124,7 @@ class SceneSplitter:
                 text = item.get("text", "")
                 duration = item.get("duration")
 
+            video_prompt = item.get("video_prompt", "") if isinstance(item, dict) else ""
             text = clean_text(text)
             wc = len(text.split())
             dur = duration or estimate_duration(wc, self.wps, self.buffer)
@@ -134,6 +135,7 @@ class SceneSplitter:
                 duration=round(dur, 2),
                 word_count=wc,
                 narration=text,
+                video_prompt=video_prompt,
                 **self._extract_hints(text),
             ))
         return scenes

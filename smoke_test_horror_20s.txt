@@ -1,0 +1,22 @@
+[
+  {
+    "duration": 5,
+    "text": "The phone rang at midnight. Her mother had been dead for three years.",
+    "video_prompt": "Victorian mansion at midnight, bright full moon overhead, silver-blue moonlight, young woman in dark coat at iron gate, face lit cold, twisted trees silhouetted against moon, glowing ground mist, deep shadows, horror cinematic 35mm, vivid"
+  },
+  {
+    "duration": 5,
+    "text": "She recognized the ringtone. Her stomach dropped.",
+    "video_prompt": "Interior Victorian parlor, vintage black rotary telephone ringing on dusty side table, empty room, silver moonlight streaming through tall cracked window casting long shadows across rotting wood floor, single white candle flickering, peeling floral wallpaper, abandoned and cold, no one present, eerie silence broken only by the ringing phone, horror cinematic 35mm, sharp detail, vivid, high contrast"
+  },
+  {
+    "duration": 5,
+    "text": "She was sitting in the chair by the window. Smiling.",
+    "video_prompt": "Young woman in dark coat entering Victorian parlor doorway, candle raised, elderly woman in white dress sitting perfectly still in armchair by cracked window, pale hollow face turned toward doorway, faint unsettling smile, warm amber candlelight and cold silver moonlight creating stark contrast, peeling wallpaper, rotting floor, terror on young woman face, horror cinematic 35mm, vivid, sharp"
+  },
+  {
+    "duration": 5,
+    "text": "She had been dead for three years. She was still smiling.",
+    "video_prompt": "Extreme close-up pale woman in armchair, hollow dark sunken eyes, cold faint smile, amber candle flicker, silver moonlight through broken window, chiaroscuro, horror cinematic 35mm, sharp, vivid"
+  }
+]
