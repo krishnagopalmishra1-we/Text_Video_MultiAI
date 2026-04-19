@@ -15,23 +15,23 @@ from .presets import build_prompt, STYLE_PRESETS, CAMERA_PRESETS
 
 
 SYSTEM_PROMPT = """You are a cinematic video prompt engineer.
-Convert scene text into a single, dense video generation prompt.
+Convert scene text into a visual description for video generation.
 Rules:
-- Max 120 words
-- Lead with the main visual subject and action
-- Include lighting, atmosphere, camera motion
+- Max 80 words
+- Describe ONLY: the visual subject, objects in frame, composition, and camera motion
+- Do NOT describe lighting, colors, atmosphere, mood, or tone — these are set by the style preset
+- Do NOT include moonlight, fog color, shadow color, or any lighting descriptors
 - No dialogue, no subtitles, no text on screen
 - No first/second person
-- Output ONLY the prompt, nothing else"""
+- Output ONLY the visual description, nothing else"""
 
 USER_TEMPLATE = """Scene text:
 {text}
 
-Style: {style}
 Camera: {camera}
 Duration: {duration}s
 
-Video prompt:"""
+Visual description (subject and composition only, NO lighting):"""
 
 
 class PromptEngine:
@@ -66,9 +66,10 @@ class PromptEngine:
                 raw = await self._llm_prompt(scene.text, style, camera, scene.duration)
                 return build_prompt(raw, style, camera, self.presets)
             except Exception as e:
-                import logging as _log
+                import logging as _log, traceback as _tb
                 _log.getLogger(__name__).warning(
-                    "LLM prompt generation failed for scene %s: %s", scene.scene_id, e
+                    "LLM prompt generation failed for scene %s: %s\n%s",
+                    scene.scene_id, e, _tb.format_exc()
                 )
 
         return build_prompt(scene.narration or scene.text, style, camera, self.presets)
@@ -90,32 +91,33 @@ class PromptEngine:
     # Internal
     # ------------------------------------------------------------------
 
-    def _get_client(self):
-        if self._client is None:
-            from google import genai
-            api_key = os.environ.get("Gemini_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
-            if not api_key:
-                raise EnvironmentError("Gemini_API_KEY not set")
-            self._client = genai.Client(api_key=api_key)
-        return self._client
+    def _get_api_key(self) -> str:
+        key = os.environ.get("Gemini_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            raise EnvironmentError("Gemini_API_KEY not set")
+        return key
 
     async def _llm_prompt(
         self, text: str, style: str, camera: str, duration: float
     ) -> str:
-        client = self._get_client()
+        import requests as _req
+        api_key = self._get_api_key()
         user_msg = USER_TEMPLATE.format(
             text=text[:800],
-            style=style,
             camera=camera.replace("_", " "),
             duration=int(duration),
         )
-        full_prompt = (SYSTEM_PROMPT + "\n\n" + user_msg).encode('ascii', errors='replace').decode('ascii')
+        full_prompt = SYSTEM_PROMPT + "\n\n" + user_msg
+        payload = {
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {"maxOutputTokens": 200, "temperature": 0.7},
+        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        resp = await loop.run_in_executor(
             None,
-            lambda: client.models.generate_content(
-                model=self.model,
-                contents=full_prompt,
-            )
+            lambda: _req.post(url, params={"key": api_key}, json=payload, timeout=30),
         )
-        return response.text.strip()
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()

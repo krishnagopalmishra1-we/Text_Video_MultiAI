@@ -51,6 +51,7 @@ class VideoRouter:
         seed: int | None = None,
         hero: bool = False,
         is_hero: bool = False,
+        style: str | None = None,
     ) -> Path:
         """
         Generate one scene clip.
@@ -72,6 +73,7 @@ class VideoRouter:
                     seed=seed,
                     strategy=self.strategy,
                     is_hero=is_hero,
+                    style=style,
                 )
             except Exception as e:
                 logger.exception(f"Local attempt {attempt}/{self.local_retries} failed")
@@ -95,6 +97,7 @@ class VideoRouter:
         seed: int | None = None,
         hero: bool = False,
         is_hero: bool = False,
+        style: str | None = None,
     ) -> Path:
         loop = asyncio.get_event_loop()
 
@@ -114,6 +117,7 @@ class VideoRouter:
                         seed=seed,
                         strategy=self.strategy,
                         is_hero=is_hero,
+                        style=style,
                     ),
                 )
             except Exception as e:

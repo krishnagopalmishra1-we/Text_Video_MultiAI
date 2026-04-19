@@ -46,9 +46,20 @@ class Wan2Runner:
 
         logger.info("Loading Wan2.1 (%s)...", self.cfg.get("hf_id", _DEFAULT_MODEL_ID))
         model_id = self.cfg.get("hf_id", _DEFAULT_MODEL_ID)
+
+        # WAN 2.1 official requirement: VAE must be float32 for artifact-free decoding.
+        # Loading the full pipeline in bfloat16 forces VAE into bfloat16, causing
+        # smear/streak artifacts. Load VAE separately in float32 first.
+        from diffusers import AutoencoderKLWan
+        logger.info("Loading VAE in float32 (WAN 2.1 requirement)...")
+        vae = AutoencoderKLWan.from_pretrained(
+            model_id, subfolder="vae", torch_dtype=torch.float32
+        ).to(self.device)
+
         try:
             self.pipe = WanPipeline.from_pretrained(
                 model_id,
+                vae=vae,
                 torch_dtype=self.dtype,
                 variant=self.variant,
             ).to(self.device)
@@ -56,14 +67,22 @@ class Wan2Runner:
             logger.warning(f"Wan2 load with variant={self.variant} failed, retrying without variant: {e}")
             self.pipe = WanPipeline.from_pretrained(
                 model_id,
+                vae=vae,
                 torch_dtype=self.dtype,
             ).to(self.device)
 
         # ── 1. VAE optimization ──────────────────────────────────────
+        # vae_slicing: only enable on low-VRAM machines. On A100 80GB, keep OFF.
+        # enable_slicing() with bfloat16 decoding produces slice-boundary artifacts
+        # (vertical stripes). VAE is now float32, but slicing still adds seams.
         if self.cfg.get("vae_tiling", False):
             self.pipe.vae.enable_tiling()
-        self.pipe.vae.enable_slicing()
-        logger.info("VAE slicing enabled.%s", " Tiling enabled." if self.cfg.get("vae_tiling", False) else "")
+            logger.info("VAE tiling enabled.")
+        if self.cfg.get("vae_slicing", False):
+            self.pipe.vae.enable_slicing()
+            logger.info("VAE slicing enabled.")
+        else:
+            logger.info("VAE slicing disabled (A100 has sufficient VRAM).")
 
         # ── 2. Attention backend ─────────────────────────────────────
         # SageAttention > Flash Attention 2 (1.5-1.7× faster, drop-in)
@@ -85,8 +104,8 @@ class Wan2Runner:
                 torch.nn.functional.scaled_dot_product_attention = _sageattn_compat
                 _sage_ok = True
                 logger.info("SageAttention monkey-patched (replaces FA2).")
-            except ImportError:
-                logger.warning("sageattention not installed — falling back to flash_attention.")
+            except Exception as e:
+                logger.warning(f"SageAttention unavailable ({e}) — falling back to PyTorch SDPA.")
 
         if not _sage_ok and self.cfg.get("flash_attention"):
             # PyTorch SDPA uses FlashAttention automatically on A100 + CUDA 12+
@@ -235,16 +254,15 @@ class Wan2Runner:
         logger.info("Warmup: triggering torch.compile with dummy inference...")
         if self._text_encoder_on_cpu:
             self.pipe.text_encoder.to(self.device)
-        with torch.autocast("cuda", dtype=self.dtype):
-            self.pipe(
-                prompt="warmup",
-                negative_prompt="",
-                num_frames=5,
-                width=128,
-                height=128,
-                guidance_scale=1.0,
-                num_inference_steps=2,
-            )
+        self.pipe(
+            prompt="warmup",
+            negative_prompt="",
+            num_frames=5,
+            width=128,
+            height=128,
+            guidance_scale=1.0,
+            num_inference_steps=2,
+        )
         if self._text_encoder_on_cpu:
             self.pipe.text_encoder.to("cpu")
             torch.cuda.empty_cache()
@@ -344,12 +362,14 @@ class Wan2Runner:
         if neg_attn is not None:
             call_kwargs["negative_prompt_attention_mask"] = neg_attn
 
-        with torch.autocast("cuda", dtype=self.dtype):
-            output = self.pipe(**call_kwargs)
+        # Do NOT wrap in torch.autocast — each component uses its own dtype.
+        # Transformer runs in bfloat16 (loaded weights), VAE runs in float32.
+        # Autocast would coerce the VAE decoder into bfloat16, causing smear artifacts.
+        output = self.pipe(**call_kwargs)
 
         frames = output.frames[0]
         out_path = Path(output_path) if output_path else Path(f"/tmp/wan2_{seed or 0}.mp4")
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        export_to_video(frames, str(out_path), fps=_fps)
+        export_to_video(frames, str(out_path), fps=_fps, quality=9)
         logger.info(f"Wan2.1 -> {out_path}")
         return out_path

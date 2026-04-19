@@ -14,13 +14,14 @@ models:
       fps: 16
       resolution: [1280, 720]
       compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
-      sage_attention: true    # compat wrapper casts q/k/v to bf16 before sageattn, output cast back
+      sage_attention: false   # disabled: SIGSEGV on first inference step (A100 + PyTorch 2.4.1 + CUDA 12.4.1)
       flash_attention: true   # fallback if SageAttention unavailable
       pab: false
       tea_cache: false
       fb_cache: false
       default_steps: 20
-      guidance_scale: 10.0
+      guidance_scale: 5.0           # official WAN 2.1 default; 10.0 amplifies artifacts
+      vae_slicing: false            # keep OFF on A100 80GB — slicing causes stripe artifacts
       offload: false
       negative_prompt: "blurry, out of focus, low resolution, pixelated, compression artifacts, watermark, text overlay, subtitles, logo, distorted, deformed, cartoon, anime, illustration, painting, CGI, 3D render, overexposed, underexposed, washed out, oversaturated, noise, grain, shaky camera, jerky motion, duplicate frames, worst quality, low quality, pitch black, completely dark, black screen, flat black, invisible subject"
       notes: "14B — best quality. PAB + TeaCache + FBCache all enabled. Balanced and Quality strategies."
@@ -106,17 +107,17 @@ strategies:
     clip_duration: 10
 
   balanced:
-    label: "Balanced — WAN 14B 1280×720 + Real-ESRGAN upscale to 1080p"
-    description: "WAN 14B at native 1280×720, Real-ESRGAN upscales to 1920×1080."
+    label: "Balanced — WAN 14B 848×480 + Real-ESRGAN upscale to 1280×720"
+    description: "WAN 14B at 848×480, Real-ESRGAN upscales to 1280×720. ~8 min/clip."
     bulk_model: "wan2_14b"
     hero_model: "wan2_14b"
     hero_scene_ids: []
-    gen_resolution: [1280, 720]
-    output_resolution: [1920, 1080]
+    gen_resolution: [848, 480]
+    output_resolution: [1280, 720]
     upscale: true
     upscale_method: "realesrgan"
-    steps: 20
-    guidance_scale: 10.0
+    steps: 30                       # 15 was too few — WAN 14B needs ≥25-30 for clean output
+    guidance_scale: 5.0             # official WAN 2.1 default; 10.0 amplified artifacts
     clip_duration: 10
 
   quality:
@@ -129,8 +130,8 @@ strategies:
     output_resolution: [1920, 1080]
     upscale: true
     upscale_method: "realesrgan"
-    steps: 20
-    guidance_scale: 10.0
+    steps: 30
+    guidance_scale: 5.0             # official WAN 2.1 default
     clip_duration: 10
 
 # Quality presets — used when strategy is NOT set (legacy / CLI fallback).

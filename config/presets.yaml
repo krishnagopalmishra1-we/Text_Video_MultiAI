@@ -29,6 +29,11 @@ styles:
     suffix: ", epic scale, emotional impact"
     negative: "flat, boring, low contrast"
 
+  horror:
+    prefix: "horror film, dramatic amber candlelight, visible detailed subject, deep shadows with bright highlights, gothic atmosphere, sharp textures, cinematic composition, 35mm,"
+    suffix: ", film grain, high detail, vivid colors, visible subject, dramatic lighting"
+    negative: "cartoon, animation, blurry, low quality, watermark, text, CGI, pitch black, completely dark, flat black, black screen, invisible, underexposed, flat lighting, washed out, bright comedy lighting, cheerful, blue tint, cold lighting, overcast"
+
 camera_motions:
   static: "static camera, locked shot,"
   pan_left: "slow pan left,"

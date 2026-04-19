@@ -52,6 +52,8 @@ def parse_args() -> argparse.Namespace:
                    choices=["fast", "balanced", "quality"],
                    help="Generation strategy: fast (1.3B), balanced (14B+upscale), quality (14B+Hunyuan hero)")
     p.add_argument("--job-id", default=None, help="Unique job ID for output organization")
+    p.add_argument("--max-words", type=int, default=30,
+                   help="Max words per scene chunk (lower = more scenes)")
     return p.parse_args()
 
 
@@ -82,11 +84,22 @@ def main() -> None:
 
     # ── 1. Scene splitting ──────────────────────────────────────────
     logger.info("Step 1/5: Splitting script into scenes…")
+    cfg = yaml.safe_load(Path("config/model_config.yaml").read_text())
+    strat_cfg = cfg.get("strategies", {}).get(args.strategy, {})
+
+    # Cap max_duration to WAN's actual output capability (max_frames / fps)
+    _bulk_model = strat_cfg.get("bulk_model", "wan2_14b")
+    _model_cfg = cfg.get("models", {}).get("local", {}).get(_bulk_model, {})
+    _wan_max_dur = _model_cfg.get("max_frames", 81) / _model_cfg.get("fps", 16)
+    effective_max_clip = min(args.max_clip, _wan_max_dur)
+    logger.info(f"  Effective max clip duration: {effective_max_clip:.1f}s (WAN max: {_wan_max_dur:.1f}s)")
+
     from scene_splitter import SceneSplitter
     splitter = SceneSplitter(
         pacing=args.pacing,
         min_duration=args.min_clip,
-        max_duration=args.max_clip,
+        max_duration=effective_max_clip,
+        max_words_per_scene=args.max_words,
     )
     scenes = splitter.split(script_text)
     splitter.to_json(scenes, out_dir / "scenes.json")
@@ -97,6 +110,7 @@ def main() -> None:
     from prompt_engine import PromptEngine
     pe = PromptEngine(style=args.style, use_llm=True)
     scenes = asyncio.run(pe.generate_batch(scenes, concurrency=4))
+    splitter.to_json(scenes, out_dir / "scenes_with_prompts.json")
     logger.info("  → Prompts generated.")
 
     # ── 3. Video generation ─────────────────────────────────────────
@@ -127,23 +141,29 @@ def main() -> None:
             scene,
             preferred_model=args.preferred_model,
             is_hero=is_hero,
+            style=args.style,
         )
         clip_paths.append(path)
         logger.info(f"    ✓ {path.name} [{time.time()-t:.1f}s]")
     router.cleanup()
 
     # ── 3.5. Upscale clips via Real-ESRGAN ──────────────────────────
-    logger.info("Step 3.5/5: Upscaling clips via Real-ESRGAN → 1920×1080…")
-    try:
-        from video_engine.upscaler import Upscaler
-        upscaler = Upscaler(tile_size=512, target_width=1920, target_height=1080)
-        upscale_dir = out_dir / "scenes_upscaled"
-        clip_paths = upscaler.upscale_batch(
-            clip_paths, upscale_dir, target_width=1920, target_height=1080
-        )
-        logger.info("  → Upscale complete.")
-    except Exception as e:
-        logger.warning(f"  ✗ Upscale failed: {e} — using raw clips.")
+    needs_upscale = strat_cfg.get("upscale", False)
+    out_w, out_h = strat_cfg.get("output_resolution", [1280, 720])
+    if needs_upscale:
+        logger.info(f"Step 3.5/5: Upscaling clips via Real-ESRGAN → {out_w}×{out_h}…")
+        try:
+            from video_engine.upscaler import Upscaler
+            upscaler = Upscaler(tile_size=512, target_width=out_w, target_height=out_h)
+            upscale_dir = out_dir / "scenes_upscaled"
+            clip_paths = upscaler.upscale_batch(
+                clip_paths, upscale_dir, target_width=out_w, target_height=out_h
+            )
+            logger.info("  → Upscale complete.")
+        except Exception as e:
+            logger.warning(f"  ✗ Upscale failed: {e} — using raw clips.")
+    else:
+        logger.info("Step 3.5/5: Upscale skipped (strategy upscale=false).")
 
     # ── 4. Audio (TTS + music) ──────────────────────────────────────
     audio_path = None
@@ -173,12 +193,14 @@ def main() -> None:
     logger.info("Step 5/5: Stitching final video…")
     from stitcher import Stitcher
     stitcher = Stitcher()
+    _res_map = {(3840, 2160): "4k", (1920, 1080): "1080p", (1280, 720): "720p"}
+    stitch_res = _res_map.get((out_w, out_h), "1080p")
     final = stitcher.stitch(
         clip_paths=clip_paths,
         output_path=final_output,
         audio_path=audio_path,
         transition=args.transition,
-        resolution="1080p",
+        resolution=stitch_res,
         target_fps=24,
         upscale_to_4k=args.upscale_4k,
     )

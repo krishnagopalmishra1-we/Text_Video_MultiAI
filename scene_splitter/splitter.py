@@ -98,9 +98,20 @@ class SceneSplitter:
     # ------------------------------------------------------------------
 
     def _from_plain_text(self, text: str) -> list[SceneData]:
-        # Split on double newline (paragraph), then merge short paragraphs
+        # Each paragraph (double newline) = one scene.
+        # Only split paragraphs that exceed max_duration.
         raw_paragraphs = re.split(r"\n{2,}", text.strip())
-        chunks = self._merge_chunks(raw_paragraphs)
+        chunks: list[str] = []
+        for para in raw_paragraphs:
+            para = clean_text(para)
+            if not para:
+                continue
+            wc = len(para.split())
+            dur = estimate_duration(wc, self.wps, self.buffer)
+            if dur > self.max_duration:
+                chunks.extend(self._split_long_paragraph(para))
+            else:
+                chunks.append(para)
         return self._build_scenes(chunks)
 
     def _from_srt(self, srt_text: str) -> list[SceneData]:

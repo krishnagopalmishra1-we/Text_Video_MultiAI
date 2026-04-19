@@ -34,9 +34,9 @@ STYLE_PRESETS: dict[str, dict] = {
         "negative": "flat, boring, low contrast, comedy, casual",
     },
     "horror": {
-        "prefix": "horror cinematic, bright cold silver moonlight as primary light source, high contrast chiaroscuro, fully visible subject, atmospheric pale mist, dramatic depth, sharp detailed textures,",
-        "suffix": ", 35mm film grain, atmospheric depth, high detail, visible and detailed",
-        "negative": "cartoon, animation, blurry, low quality, watermark, text, CGI, pitch black, completely dark, flat black, black screen, invisible, underexposed, flat lighting, washed out, bright comedy lighting, cheerful, warm sunlight",
+        "prefix": "horror film, dramatic amber candlelight, visible detailed subject, deep shadows with bright highlights, gothic atmosphere, sharp textures, cinematic composition, 35mm,",
+        "suffix": ", film grain, high detail, vivid colors, visible subject, dramatic lighting",
+        "negative": "cartoon, animation, blurry, low quality, watermark, text, CGI, pitch black, completely dark, flat black, black screen, invisible, underexposed, flat lighting, washed out, bright comedy lighting, cheerful, blue tint, cold lighting, overcast",
     },
 }
 

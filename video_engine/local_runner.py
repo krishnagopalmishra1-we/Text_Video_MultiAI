@@ -64,13 +64,27 @@ def _ensure_duration(path: Path, target: float) -> Path:
 
 
 class LocalRunner:
-    def __init__(self, config_path: str | Path = "config/model_config.yaml"):
+    def __init__(
+        self,
+        config_path: str | Path = "config/model_config.yaml",
+        presets_path: str | Path = "config/presets.yaml",
+    ):
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
 
         self.model_cfgs: dict = cfg["models"]["local"]
         self.quality_presets: dict = cfg.get("quality_presets", {})
         self.strategies: dict = cfg.get("strategies", {})
+
+        try:
+            with open(presets_path) as f:
+                _presets = yaml.safe_load(f)
+            self._style_negatives: dict[str, str] = {
+                k: v.get("negative", "")
+                for k, v in _presets.get("styles", {}).items()
+            }
+        except FileNotFoundError:
+            self._style_negatives = {}
         self._runners: dict[str, Wan2Runner | HunyuanRunner] = {}
         self._active_model: str | None = None
 
@@ -98,6 +112,7 @@ class LocalRunner:
         seed: int | None = None,
         strategy: str | None = None,
         is_hero: bool = False,
+        style: str | None = None,
     ) -> Path:
         """Generate a single scene clip. Returns path to output MP4."""
         out_dir = Path(output_dir)
@@ -146,8 +161,13 @@ class LocalRunner:
             guidance_scale=guidance,
             seed=seed if seed is not None else scene.scene_id,
         )
-        if mcfg.get("negative_prompt"):
-            kwargs["negative_prompt"] = mcfg["negative_prompt"]
+        # Merge model negative with style-specific negative
+        neg_parts = [p for p in [
+            mcfg.get("negative_prompt", ""),
+            self._style_negatives.get(style or scene.style_hint or "", ""),
+        ] if p]
+        if neg_parts:
+            kwargs["negative_prompt"] = ", ".join(neg_parts)
         clip = runner.generate(**kwargs)
         clip = _ensure_duration(clip, scene.duration)
         return clip
