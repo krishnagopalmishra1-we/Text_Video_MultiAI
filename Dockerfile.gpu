@@ -6,7 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:$PATH" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH" \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    TORCH_CUDA_ARCH_LIST="8.0"
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,9 +39,20 @@ RUN python -m pip install --no-cache-dir packaging wheel setuptools ninja
 # Flash Attention (compiled for A100 sm_80)
 RUN python -m pip install --no-cache-dir flash-attn --no-build-isolation
 
+# SageAttention 2.2.0 from source — 1.0.6 on PyPI segfaults (SIGSEGV) with PyTorch 2.4.1+cu124
+RUN python -m pip install --no-cache-dir --no-build-isolation git+https://github.com/thu-ml/SageAttention.git
+
 # App requirements
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
+
+# Download RealESRGAN weights (required by upscaler at runtime)
+RUN mkdir -p /root/.cache/realesrgan && \
+    wget -q -O /root/.cache/realesrgan/RealESRGAN_x4plus.pth \
+    https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
+
+# Download NLTK punkt_tab tokenizer data
+RUN python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
 
 # Patch diffusers attention_dispatch.py: wrap flash_attn_3 custom_op registration in
 # try/except to avoid infer_schema failure with flash-attn>=2.8 string annotations.
