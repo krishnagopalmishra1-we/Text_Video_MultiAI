@@ -77,6 +77,7 @@ def main() -> None:
         "docker", "exec",
         "-e", f"Gemini_API_KEY={gemini_key}",
         "-e", f"HF_TOKEN={hf_token}",
+        "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
         CONTAINER,
         "python3", "/app/orchestrator.py",
         "--script", SCRIPT_PATH,

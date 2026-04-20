@@ -14,11 +14,11 @@ models:
       fps: 16
       resolution: [1280, 720]
       compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
-      sage_attention: false   # SIGSEGV on first step: A100 + PyTorch 2.4.1 + CUDA 12.4.1, confirmed both 1.0.6 and 2.2.0
+      sage_attention: true    # Working on PyTorch 2.5.1+cu124 — upgraded from 2.4.1 which SIGSEGV'd
       flash_attention: true   # fallback if SageAttention unavailable
-      pab: false
-      tea_cache: false
-      fb_cache: false
+      pab: true
+      tea_cache: true
+      fb_cache: true
       default_steps: 20
       guidance_scale: 5.0           # official WAN 2.1 default; 10.0 amplifies artifacts
       vae_slicing: false            # keep OFF on A100 80GB — slicing causes stripe artifacts

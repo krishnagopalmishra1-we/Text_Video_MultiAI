@@ -95,9 +95,9 @@ class Wan2Runner:
                     # sageattn asserts all same dtype — cast to bf16, cast output back.
                     orig_dtype = query.dtype
                     out = _sageattn_raw(
-                        query.to(torch.bfloat16),
-                        key.to(torch.bfloat16),
-                        value.to(torch.bfloat16),
+                        query.to(torch.bfloat16).contiguous(),
+                        key.to(torch.bfloat16).contiguous(),
+                        value.to(torch.bfloat16).contiguous(),
                         is_causal=is_causal,
                     )
                     return out.to(orig_dtype)

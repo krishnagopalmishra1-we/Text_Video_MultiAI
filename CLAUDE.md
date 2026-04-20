@@ -21,7 +21,7 @@ Three generation strategies: fast / balanced / quality.
 ## Model Stack (in priority order)
 | Priority | Model | VRAM | Use case | Acceleration |
 |---|---|---|---|---|
-| 1 | Wan2.1-T2V-14B | ~42GB | Default (balanced/quality) | PyTorch SDPA (FlashAttn2 auto on A100). SageAttn DISABLED — SIGSEGV on first inference step (PyTorch 2.4.1 + CUDA 12.4.1) |
+| 1 | Wan2.1-T2V-14B | ~42GB | Default (balanced/quality) | PyTorch SDPA (FlashAttn2 auto on A100). SageAttn ENABLED — SIGSEGV fixed by PyTorch 2.5.1+cu124 |
 | 2 | Wan2.1-T2V-1.3B | ~8GB | Not used — produces blurry/low quality output | — |
 | 3 | HunyuanVideo INT8 | ~37GB | Hero/cinematic scenes (quality only) | bitsandbytes INT8 quantization |
 | 4 | LTX-Video | ~10GB | Preview/fastest (not yet wired) | standard |
@@ -60,7 +60,7 @@ Three generation strategies: fast / balanced / quality.
 - **Text encoder offload** — moved to CPU after encoding to free VRAM for generation
 
 ## Strict Rules When Modifying
-- Never enable sage_attention — SIGSEGV on first inference step confirmed with BOTH 1.0.6 (PyPI) and 2.2.0 (GitHub source). A100 + PyTorch 2.4.1 + CUDA 12.4.1. Fix requires upgrading PyTorch.
+- Must enable sage_attention — SIGSEGV on first inference step is fixed with PyTorch 2.5.1 + CUDA 12.4.1 + SageAttention 2.2.0.
 - Never change Wan2 acceleration order: SageAttn → PAB → TeaCache → FBCache → compile
 - Never add model CPU offload without updating `_VRAM_THRESHOLDS` in local_runner.py
 - Never change `worker_prefetch_multiplier` from 1 on GPU worker (causes OOM)
