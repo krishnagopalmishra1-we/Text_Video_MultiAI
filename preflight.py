@@ -11,6 +11,13 @@ from pathlib import Path
 def check() -> list[str]:
     errors = []
 
+    # Apply torchvision compat shim (basicsr/realesrgan need functional_tensor removed in newer torchvision)
+    try:
+        from video_engine.upscaler import _torchvision_shim
+        _torchvision_shim()
+    except Exception:
+        pass
+
     # Python packages
     for pkg in ['cv2', 'torch', 'diffusers', 'realesrgan', 'basicsr',
                 'sageattention', 'nltk', 'yaml', 'google.genai']:
