@@ -60,7 +60,7 @@ Three generation strategies: fast / balanced / quality.
 - **Text encoder offload** — moved to CPU after encoding to free VRAM for generation
 
 ## Strict Rules When Modifying
-- SageAttention enabled as of horror_v13 — using 2.2.0 from GitHub source (1.0.6 on PyPI caused SIGSEGV, now fixed). `sage_attention: true` in wan2_14b config.
+- Never enable sage_attention — SIGSEGV on first inference step confirmed with BOTH 1.0.6 (PyPI) and 2.2.0 (GitHub source). A100 + PyTorch 2.4.1 + CUDA 12.4.1. Fix requires upgrading PyTorch.
 - Never change Wan2 acceleration order: SageAttn → PAB → TeaCache → FBCache → compile
 - Never add model CPU offload without updating `_VRAM_THRESHOLDS` in local_runner.py
 - Never change `worker_prefetch_multiplier` from 1 on GPU worker (causes OOM)

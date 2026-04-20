@@ -14,7 +14,7 @@ models:
       fps: 16
       resolution: [1280, 720]
       compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
-      sage_attention: true    # enabled: SageAttention 2.2.0 from GitHub (1.0.6 segfaulted, 2.2.0 fixed)
+      sage_attention: false   # SIGSEGV on first step: A100 + PyTorch 2.4.1 + CUDA 12.4.1, confirmed both 1.0.6 and 2.2.0
       flash_attention: true   # fallback if SageAttention unavailable
       pab: false
       tea_cache: false
