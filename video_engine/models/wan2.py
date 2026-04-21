@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 
+_sage_ok = False
+
 
 class Wan2Runner:
     def __init__(self, cfg: dict):
@@ -86,19 +88,27 @@ class Wan2Runner:
 
         # ── 2. Attention backend ─────────────────────────────────────
         # SageAttention > Flash Attention 2 (1.5-1.7× faster, drop-in)
-        _sage_ok = False
+        self._sdpa_orig = torch.nn.functional.scaled_dot_product_attention
+        self._sdpa_patched = None  # set below if SageAttention is available
         if self.cfg.get("sage_attention", False):
             try:
                 from sageattention import sageattn as _sageattn_raw
+                _sdpa_orig_ref = self._sdpa_orig
+                # SageAttention 2.x only supports specific head dims (64, 96, 128, 256, 512).
+                # The VAE (AutoencoderKLWan) uses head_dim=384 — must fall back to standard SDPA.
+                # Float32 inputs (from VAE) are also unsupported — fall back for those too.
+                # The patch is scoped to WAN inference only (see generate()) to avoid SIGSEGV
+                # when other models (MusicGen, Kokoro) use SDPA after WAN finishes.
+                _SAGE_SUPPORTED_HEAD_DIMS = {64, 96, 128, 256, 512}
                 def _sageattn_compat(*args, **kwargs):
-                    # Robust wrapper: accepts both positional and keyword args from diffusers.
-                    # Positional order matches torch.nn.functional.scaled_dot_product_attention:
-                    # (query, key, value, attn_mask, dropout_p, is_causal, scale, ...)
                     q = args[0] if len(args) > 0 else kwargs.get("query")
                     k = args[1] if len(args) > 1 else kwargs.get("key")
                     v = args[2] if len(args) > 2 else kwargs.get("value")
                     is_causal = args[5] if len(args) > 5 else kwargs.get("is_causal", False)
-                    # WAN cross-attention passes mixed dtypes — cast to bf16, return in original dtype.
+                    head_dim = q.shape[-1]
+                    # Fall back to standard SDPA for unsupported head dims or float32 (VAE path).
+                    if head_dim not in _SAGE_SUPPORTED_HEAD_DIMS or q.dtype == torch.float32:
+                        return _sdpa_orig_ref(*args, **kwargs)
                     orig_dtype = q.dtype
                     out = _sageattn_raw(
                         q.to(torch.bfloat16).contiguous(),
@@ -107,9 +117,11 @@ class Wan2Runner:
                         is_causal=is_causal,
                     )
                     return out.to(orig_dtype)
-                torch.nn.functional.scaled_dot_product_attention = _sageattn_compat
+                self._sdpa_patched = _sageattn_compat
+                global _sage_ok
                 _sage_ok = True
-                logger.info("SageAttention monkey-patched (replaces FA2).")
+                # Do NOT patch globally here — generate() patches/restores around each forward pass.
+                logger.info("SageAttention ready (will be activated per-generate call).")
             except Exception as e:
                 logger.warning(f"SageAttention unavailable ({e}) — falling back to PyTorch SDPA.")
 
@@ -126,7 +138,7 @@ class Wan2Runner:
                 faster_cfg = FasterCacheConfig(
                     spatial_attention_block_skip_range=2,
                     current_timestep_callback=lambda: self._current_timestep[0],
-                    is_guidance_distilled=False,  # WAN 14B uses standard CFG (two passes), not distilled
+                    is_guidance_distilled=True,  # WAN 14B calls model with batch_size=1 per pass (not concatenated CFG batch)
                 )
                 apply_faster_cache(self.pipe.transformer, faster_cfg)
                 logger.info("FasterCache applied (diffusers 0.37+ replacement for TeaCache).")
@@ -242,15 +254,21 @@ class Wan2Runner:
         logger.info("Warmup: triggering torch.compile with dummy inference...")
         if self._text_encoder_on_cpu:
             self.pipe.text_encoder.to(self.device)
-        self.pipe(
-            prompt="warmup",
-            negative_prompt="",
-            num_frames=5,
-            width=128,
-            height=128,
-            guidance_scale=1.0,
-            num_inference_steps=2,
-        )
+        if self._sdpa_patched is not None:
+            torch.nn.functional.scaled_dot_product_attention = self._sdpa_patched
+        try:
+            self.pipe(
+                prompt="warmup",
+                negative_prompt="",
+                num_frames=5,
+                width=128,
+                height=128,
+                guidance_scale=1.0,
+                num_inference_steps=2,
+            )
+        finally:
+            if self._sdpa_patched is not None:
+                torch.nn.functional.scaled_dot_product_attention = self._sdpa_orig
         if self._text_encoder_on_cpu:
             self.pipe.text_encoder.to("cpu")
             torch.cuda.empty_cache()
@@ -309,6 +327,10 @@ class Wan2Runner:
         from diffusers.utils import export_to_video
 
         self.load()
+        # Reset timestep tracker so FasterCache/FBCache see high timestep on first step.
+        # Without this, a leftover low timestep from the previous scene causes FasterCache
+        # to attempt attention-block skipping before its cache is initialized → crash.
+        self._current_timestep[0] = 1000
         _fps = fps or self.cfg.get("fps", 16)
         num_frames = min(int(duration * _fps) + 1, self.cfg.get("max_frames", 81))
         if num_frames % 2 == 0:
@@ -350,10 +372,18 @@ class Wan2Runner:
         if neg_attn is not None:
             call_kwargs["negative_prompt_attention_mask"] = neg_attn
 
-        # Do NOT wrap in torch.autocast — each component uses its own dtype.
-        # Transformer runs in bfloat16 (loaded weights), VAE runs in float32.
-        # Autocast would coerce the VAE decoder into bfloat16, causing smear artifacts.
-        output = self.pipe(**call_kwargs)
+        # Activate SageAttention only during WAN inference, then restore original SDPA.
+        # Scoping prevents SIGSEGV when downstream models (MusicGen, Kokoro) use SDPA.
+        if self._sdpa_patched is not None:
+            torch.nn.functional.scaled_dot_product_attention = self._sdpa_patched
+        try:
+            # Do NOT wrap in torch.autocast — each component uses its own dtype.
+            # Transformer runs in bfloat16 (loaded weights), VAE runs in float32.
+            # Autocast would coerce the VAE decoder into bfloat16, causing smear artifacts.
+            output = self.pipe(**call_kwargs)
+        finally:
+            if self._sdpa_patched is not None:
+                torch.nn.functional.scaled_dot_product_attention = self._sdpa_orig
 
         frames = output.frames[0]
         out_path = Path(output_path) if output_path else Path(f"/tmp/wan2_{seed or 0}.mp4")

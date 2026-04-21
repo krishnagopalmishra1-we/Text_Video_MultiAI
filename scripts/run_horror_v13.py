@@ -86,6 +86,7 @@ def main() -> None:
         "--job-id", JOB_ID,
         "--min-clip", "5.0",
         "--max-clip", "5.1",
+        "--resume",
     ]
 
     print(f"Launching horror_v13... log → {LOG_PATH}")

@@ -137,6 +137,16 @@ def main() -> None:
     for i, scene in enumerate(scenes, 1):
         t = time.time()
         is_hero = scene.scene_id in hero_scene_ids
+        
+        # Determine candidate output path for resume check
+        clip_name = f"scene_{scene.scene_id:04d}.mp4"
+        clip_path = out_dir / "scenes" / clip_name
+        
+        if args.resume and clip_path.exists():
+            logger.info(f"  Scene {i}/{len(scenes)} (id={scene.scene_id}): skip (exists)")
+            clip_paths.append(clip_path)
+            continue
+
         logger.info(f"  Scene {i}/{len(scenes)} (id={scene.scene_id}, {scene.duration:.1f}s, hero={is_hero})…")
         path = router.generate_scene(
             scene,
