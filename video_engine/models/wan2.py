@@ -90,14 +90,20 @@ class Wan2Runner:
         if self.cfg.get("sage_attention", False):
             try:
                 from sageattention import sageattn as _sageattn_raw
-                def _sageattn_compat(query=None, key=None, value=None, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kwargs):
-                    # WAN cross-attention passes mixed dtypes (text encoder fp32, model bf16).
-                    # sageattn asserts all same dtype — cast to bf16, cast output back.
-                    orig_dtype = query.dtype
+                def _sageattn_compat(*args, **kwargs):
+                    # Robust wrapper: accepts both positional and keyword args from diffusers.
+                    # Positional order matches torch.nn.functional.scaled_dot_product_attention:
+                    # (query, key, value, attn_mask, dropout_p, is_causal, scale, ...)
+                    q = args[0] if len(args) > 0 else kwargs.get("query")
+                    k = args[1] if len(args) > 1 else kwargs.get("key")
+                    v = args[2] if len(args) > 2 else kwargs.get("value")
+                    is_causal = args[5] if len(args) > 5 else kwargs.get("is_causal", False)
+                    # WAN cross-attention passes mixed dtypes — cast to bf16, return in original dtype.
+                    orig_dtype = q.dtype
                     out = _sageattn_raw(
-                        query.to(torch.bfloat16).contiguous(),
-                        key.to(torch.bfloat16).contiguous(),
-                        value.to(torch.bfloat16).contiguous(),
+                        q.to(torch.bfloat16).contiguous(),
+                        k.to(torch.bfloat16).contiguous(),
+                        v.to(torch.bfloat16).contiguous(),
                         is_causal=is_causal,
                     )
                     return out.to(orig_dtype)
@@ -111,26 +117,8 @@ class Wan2Runner:
             # PyTorch SDPA uses FlashAttention automatically on A100 + CUDA 12+
             logger.info("Flash Attention: relying on PyTorch SDPA (automatic on A100/CUDA12+).")
 
-        # ── 3. Attention caching (PAB) ───────────────────────────────
-        if self.cfg.get("pab"):
-            try:
-                from diffusers.hooks import apply_pyramid_attention_broadcast
-                from diffusers.hooks.pyramid_attention_broadcast import PyramidAttentionBroadcastConfig
-                pab_config = PyramidAttentionBroadcastConfig(
-                    spatial_attention_block_skip_range=2,
-                    temporal_attention_block_skip_range=2,
-                    cross_attention_block_skip_range=2,
-                    spatial_attention_timestep_skip_range=(100, 800),
-                    temporal_attention_timestep_skip_range=(100, 800),
-                    cross_attention_timestep_skip_range=(100, 800),
-                    current_timestep_callback=lambda: self._current_timestep[0],
-                )
-                apply_pyramid_attention_broadcast(self.pipe.transformer, pab_config)
-                logger.info("PAB (Pyramid Attention Broadcast) applied.")
-            except Exception as e:
-                logger.warning(f"PAB unavailable: {e}")
-
-        # ── 4. FasterCache (replaces TeaCache — diffusers 0.37+) ─────
+        # ── 3. FasterCache (diffusers 0.37+ cross-timestep attention caching) ──
+        # PAB removed — conflicts with FasterCache when stacked on the same transformer.
         if self.cfg.get("tea_cache"):
             try:
                 from diffusers.hooks import apply_faster_cache
@@ -138,14 +126,14 @@ class Wan2Runner:
                 faster_cfg = FasterCacheConfig(
                     spatial_attention_block_skip_range=2,
                     current_timestep_callback=lambda: self._current_timestep[0],
-                    is_guidance_distilled=True,
+                    is_guidance_distilled=False,  # WAN 14B uses standard CFG (two passes), not distilled
                 )
                 apply_faster_cache(self.pipe.transformer, faster_cfg)
                 logger.info("FasterCache applied (diffusers 0.37+ replacement for TeaCache).")
             except Exception as e:
                 logger.warning(f"FasterCache unavailable: {e}")
 
-        # ── 5. First-Block Cache (FBCache) ───────────────────────────
+        # ── 4. First-Block Cache (FBCache) ───────────────────────────
         if self.cfg.get("fb_cache"):
             try:
                 from diffusers.hooks import apply_first_block_cache

@@ -16,7 +16,6 @@ models:
       compile: false          # disabled: torch.compile SIGSEGV on PyTorch 2.4.1 + CUDA 12.4.1
       sage_attention: true    # Working on PyTorch 2.5.1+cu124 — upgraded from 2.4.1 which SIGSEGV'd
       flash_attention: true   # fallback if SageAttention unavailable
-      pab: true
       tea_cache: true
       fb_cache: true
       default_steps: 20

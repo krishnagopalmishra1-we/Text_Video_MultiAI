@@ -60,8 +60,10 @@ Three generation strategies: fast / balanced / quality.
 - **Text encoder offload** — moved to CPU after encoding to free VRAM for generation
 
 ## Strict Rules When Modifying
-- Must enable sage_attention — SIGSEGV on first inference step is fixed with PyTorch 2.5.1 + CUDA 12.4.1 + SageAttention 2.2.0.
-- Never change Wan2 acceleration order: SageAttn → PAB → TeaCache → FBCache → compile
+- Must enable sage_attention — SIGSEGV fixed with PyTorch 2.5.1 + CUDA 12.4.1 + SageAttention 2.2.0.
+- Wan2 acceleration order: SageAttn → FasterCache → FBCache → compile (PAB removed — conflicts with FasterCache on diffusers 0.37+)
+- FasterCache `is_guidance_distilled` must be `False` for WAN 14B (standard CFG, not distilled)
+- PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True required in docker-compose.yml + run scripts (PAB+FasterCache+FBCache reserved-memory fragmentation fix)
 - Never add model CPU offload without updating `_VRAM_THRESHOLDS` in local_runner.py
 - Never change `worker_prefetch_multiplier` from 1 on GPU worker (causes OOM)
 - FFmpeg threads must be passed as string, not int: `str(self.cpu_threads)`

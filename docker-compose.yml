@@ -58,6 +58,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DATABASE_URL=postgresql://${POSTGRES_USER:-videogen}:${POSTGRES_PASSWORD:-videogen_password}@postgres:5432/${POSTGRES_DB:-videogen}
       - TORCHINDUCTOR_CACHE_DIR=/app/outputs/.torch_cache
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     env_file: .env
     volumes:
       - ./config:/app/config:ro
